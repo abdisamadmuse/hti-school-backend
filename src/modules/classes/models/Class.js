@@ -26,6 +26,13 @@ const classSchema = new mongoose.Schema(
       required: true,
     },
 
+    shift: {
+      type: String,
+      enum: ["Morning", "Afternoon"],
+      default: "Morning",
+      required: true,
+    },
+
     isActive: {
       type: Boolean,
       default: true,

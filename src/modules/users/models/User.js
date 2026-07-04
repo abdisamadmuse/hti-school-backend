@@ -55,6 +55,21 @@ const userSchema = new mongoose.Schema(
       },
     ],
 
+    attendanceShift: {
+      type: String,
+      enum: ["Morning", "Afternoon", "All"],
+      default: "All",
+      set: (value) => {
+        const normalizedValue = String(value || "").trim().toLowerCase();
+
+        if (normalizedValue === "all") return "All";
+        if (normalizedValue === "morning") return "Morning";
+        if (normalizedValue === "afternoon") return "Afternoon";
+
+        return value;
+      },
+    },
+
     isActive: {
       type: Boolean,
       default: true,

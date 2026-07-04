@@ -3,6 +3,14 @@ const jwt = require("jsonwebtoken");
 
 const User = require("../../users/models/User");
 
+const getAttendanceShift = (data) =>
+  data.attendanceShift ||
+  data.attendance_shift ||
+  data.attendanceShiftId ||
+  data.attendance_shiftId ||
+  data.attendance_shift_id ||
+  data.shift;
+
 // Generate JWT Token
 const generateToken = (user) => {
   return jwt.sign(
@@ -24,6 +32,7 @@ const registerUser = async (req, res) => {
   try {
     const { fullName, email, phone, password, role, departmentId, departmentIds } =
       req.body;
+    const attendanceShift = getAttendanceShift(req.body);
 
     // Check existing user
     const existingUser = await User.findOne({
@@ -54,6 +63,7 @@ const registerUser = async (req, res) => {
       role,
       departmentId: departmentId || normalizedDepartmentIds[0] || null,
       departmentIds: normalizedDepartmentIds,
+      attendanceShift,
     });
 
     // Generate token
@@ -70,6 +80,7 @@ const registerUser = async (req, res) => {
         role: user.role,
         departmentId: user.departmentId,
         departmentIds: user.departmentIds,
+        attendanceShift: user.attendanceShift,
       },
     });
   } catch (error) {
@@ -119,6 +130,7 @@ const loginUser = async (req, res) => {
         role: user.role,
         departmentId: user.departmentId,
         departmentIds: user.departmentIds || [],
+        attendanceShift: user.attendanceShift,
       },
     });
   } catch (error) {

@@ -6,6 +6,32 @@ const uniqueIds = (ids) => [
   ...new Set((ids || []).filter(Boolean).map((id) => id.toString())),
 ];
 
+const normalizeAttendanceShift = (shift) => {
+  const normalizedShift = String(shift || "").trim().toLowerCase();
+
+  if (!normalizedShift || normalizedShift === "all") {
+    return null;
+  }
+
+  if (normalizedShift === "morning") {
+    return "Morning";
+  }
+
+  if (normalizedShift === "afternoon") {
+    return "Afternoon";
+  }
+
+  return shift;
+};
+
+const applyAttendanceShiftFilter = (filters, user) => {
+  const attendanceShift = normalizeAttendanceShift(user.attendanceShift);
+
+  if (attendanceShift) {
+    filters.shift = attendanceShift;
+  }
+};
+
 exports.getAssignedAttendanceClasses = async (req, res) => {
   try {
     const departmentIds = uniqueIds([
@@ -26,10 +52,14 @@ exports.getAssignedAttendanceClasses = async (req, res) => {
       });
     }
 
-    const classes = await Class.find({
+    const classFilters = {
       departmentId: { $in: departmentIds },
       isActive: true,
-    })
+    };
+
+    applyAttendanceShiftFilter(classFilters, req.user);
+
+    const classes = await Class.find(classFilters)
       .populate("departmentId")
       .populate("programId")
       .populate("academicYearId")
@@ -140,6 +170,7 @@ exports.getAssignedAttendanceClasses = async (req, res) => {
               name: classItem.programId.name,
             }
           : null,
+        shift: classItem.shift,
         academicYear: classItem.academicYearId
           ? {
               id: classItem.academicYearId._id,
@@ -189,11 +220,15 @@ exports.getAssignedClassStudents = async (req, res) => {
       req.user.departmentId,
     ]);
 
-    const classItem = await Class.findOne({
+    const classFilters = {
       _id: req.params.classId,
       departmentId: { $in: departmentIds },
       isActive: true,
-    })
+    };
+
+    applyAttendanceShiftFilter(classFilters, req.user);
+
+    const classItem = await Class.findOne(classFilters)
       .populate("departmentId")
       .populate("programId")
       .populate("academicYearId");
@@ -249,6 +284,7 @@ exports.getAssignedClassStudents = async (req, res) => {
               name: classItem.programId.name,
             }
           : null,
+        shift: classItem.shift,
         academicYear: classItem.academicYearId
           ? {
               id: classItem.academicYearId._id,

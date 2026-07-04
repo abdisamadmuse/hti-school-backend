@@ -9,6 +9,14 @@ const normalizeDepartmentIds = ({ departmentId, departmentIds }) => {
   return departmentId ? [departmentId] : [];
 };
 
+const getAttendanceShift = (data) =>
+  data.attendanceShift ||
+  data.attendance_shift ||
+  data.attendanceShiftId ||
+  data.attendance_shiftId ||
+  data.attendance_shift_id ||
+  data.shift;
+
 const populateUserDepartments = (query) =>
   query.populate("departmentId").populate("departmentIds");
 
@@ -48,8 +56,16 @@ exports.getUserById = async (req, res) => {
 // Create user by admin
 exports.createUser = async (req, res) => {
   try {
-    const { fullName, email, phone, password, role, departmentId, departmentIds } =
-      req.body;
+    const {
+      fullName,
+      email,
+      phone,
+      password,
+      role,
+      departmentId,
+      departmentIds,
+    } = req.body;
+    const attendanceShift = getAttendanceShift(req.body);
 
     const exists = await User.findOne({
       $or: [{ email }, { phone }],
@@ -73,6 +89,7 @@ exports.createUser = async (req, res) => {
       role,
       departmentId: departmentId || normalizedDepartmentIds[0] || null,
       departmentIds: normalizedDepartmentIds,
+      attendanceShift,
     });
 
     res.status(201).json({
@@ -85,6 +102,7 @@ exports.createUser = async (req, res) => {
         role: user.role,
         departmentId: user.departmentId,
         departmentIds: user.departmentIds,
+        attendanceShift: user.attendanceShift,
         isActive: user.isActive,
       },
     });
@@ -97,9 +115,14 @@ exports.createUser = async (req, res) => {
 exports.updateUser = async (req, res) => {
   try {
     const { password, ...updateData } = req.body;
+    const attendanceShift = getAttendanceShift(updateData);
 
     if (password) {
       updateData.password = await bcrypt.hash(password, 10);
+    }
+
+    if (attendanceShift) {
+      updateData.attendanceShift = attendanceShift;
     }
 
     if (
