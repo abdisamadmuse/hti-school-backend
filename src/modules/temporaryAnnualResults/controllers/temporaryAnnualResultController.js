@@ -1,0 +1,11 @@
+const service = require("../services/temporaryAnnualResultService");
+const send = (res, error) => res.status(error.status || 500).json({ message: error.message, ...(error.details || {}) });
+exports.preview = async (req, res) => { try { if (!req.file?.buffer) throw Object.assign(new Error("Excel file is required"), { status: 400 }); res.json(await service.preview(req.file.buffer, req.file.originalname, req.body, req.user._id)); } catch (error) { send(res, error); } };
+exports.commit = async (req, res) => { try { res.status(201).json(await service.commit(req.body, req.user._id)); } catch (error) { send(res, error); } };
+exports.publish = async (req, res) => { try { res.json(await service.publish(req.params.batchId, req.user._id)); } catch (error) { send(res, error); } };
+exports.list = async (_req, res) => { try { res.json(await service.list()); } catch (error) { send(res, error); } };
+exports.details = async (req, res) => { try { res.json(await service.details(req.params.batchId)); } catch (error) { send(res, error); } };
+exports.updateNames = async (req, res) => { try { res.json(await service.updateNames(req.params.batchId, req.body)); } catch (error) { send(res, error); } };
+exports.deleteBatch = async (req, res) => { try { res.json(await service.deleteBatch(req.params.batchId)); } catch (error) { send(res, error); } };
+exports.correctMark = async (req, res) => { try { res.json(await service.correctMark(req.params.batchId, req.params.markId, req.body)); } catch (error) { send(res, error); } };
+exports.public = async (req, res) => { try { res.json(await service.publicResult(req.query.reference)); } catch (error) { send(res, error); } };

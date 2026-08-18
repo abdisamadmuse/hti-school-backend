@@ -1,13 +1,48 @@
 const Class = require("../models/Class");
+const Program = require("../../programs/models/Program");
+
+const getClassShift = (data) =>
+  data.shift ||
+  data.classShift ||
+  data.class_shift ||
+  data.attendanceShift ||
+  data.attendance_shift;
+
+const normalizeClassPayload = async (data, currentClass = null) => {
+  const payload = { ...data };
+  const shift = getClassShift(payload);
+  const programId = payload.programId || currentClass?.programId;
+
+  if (programId) {
+    const program = await Program.findById(programId);
+
+    if (!program) {
+      const error = new Error("Program not found");
+      error.status = 400;
+      throw error;
+    }
+
+    if (program.name === "Secondary") {
+      payload.shift = null;
+      return payload;
+    }
+  }
+
+  if (shift) {
+    payload.shift = shift;
+  }
+
+  return payload;
+};
 
 // CREATE CLASS
 exports.createClass = async (req, res) => {
   try {
-    const newClass = await Class.create(req.body);
+    const newClass = await Class.create(await normalizeClassPayload(req.body));
 
     res.status(201).json(newClass);
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }
@@ -55,10 +90,18 @@ exports.getClassById = async (req, res) => {
 // UPDATE CLASS
 exports.updateClass = async (req, res) => {
   try {
+    const currentClass = await Class.findById(req.params.id);
+
+    if (!currentClass) {
+      return res.status(404).json({
+        message: "Class not found",
+      });
+    }
+
     const updatedClass = await Class.findByIdAndUpdate(
       req.params.id,
-      req.body,
-      { new: true }
+      await normalizeClassPayload(req.body, currentClass),
+      { new: true, runValidators: true }
     );
 
     if (!updatedClass) {
@@ -69,7 +112,7 @@ exports.updateClass = async (req, res) => {
 
     res.json(updatedClass);
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }

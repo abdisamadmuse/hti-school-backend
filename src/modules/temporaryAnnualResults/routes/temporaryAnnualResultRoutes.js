@@ -1,0 +1,16 @@
+const express = require("express");
+const controller = require("../controllers/temporaryAnnualResultController");
+const upload = require("../../legacyResults/middleware/legacyExcelUpload");
+const { protect, authorize } = require("../../../middleware/authMiddleware");
+const router = express.Router();
+const managers = authorize("SuperAdmin", "ExamManager");
+router.get("/public", controller.public);
+router.post("/import/preview", protect, managers, upload, controller.preview);
+router.post("/import/commit", protect, managers, controller.commit);
+router.get("/batches", protect, managers, controller.list);
+router.get("/batches/:batchId", protect, managers, controller.details);
+router.patch("/batches/:batchId", protect, managers, controller.updateNames);
+router.delete("/batches/:batchId", protect, managers, controller.deleteBatch);
+router.patch("/batches/:batchId/marks/:markId", protect, managers, controller.correctMark);
+router.post("/batches/:batchId/publish", protect, managers, controller.publish);
+module.exports = router;

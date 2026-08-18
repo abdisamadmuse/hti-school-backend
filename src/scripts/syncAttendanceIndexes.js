@@ -1,21 +1,15 @@
 require("dotenv").config();
+const { sequelize, initializeModels } = require("../config/mysql");
 
-const mongoose = require("mongoose");
-
-const Attendance = require("../modules/attendance/models/Attendance");
-
-const syncAttendanceIndexes = async () => {
+(async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URI);
-    const indexes = await Attendance.syncIndexes();
-
-    console.log("Attendance indexes synced:", indexes);
+    initializeModels();
+    await sequelize.sync({ alter: true });
+    console.log("MySQL attendance indexes synchronized successfully");
   } catch (error) {
-    console.error("Failed to sync attendance indexes:", error.message);
+    console.error("Failed to synchronize MySQL indexes:", error.message);
     process.exitCode = 1;
   } finally {
-    await mongoose.disconnect();
+    await sequelize.close();
   }
-};
-
-syncAttendanceIndexes();
+})();

@@ -1,13 +1,27 @@
 const Department = require("../models/Department");
 
+const departmentPayload = (input) => {
+  const payload = { ...input };
+  if (Object.prototype.hasOwnProperty.call(payload, "defaultPassMark")) {
+    const value = Number(payload.defaultPassMark);
+    if (!Number.isFinite(value) || value < 0 || value > 100) {
+      const error = new Error("defaultPassMark must be between 0 and 100");
+      error.status = 400;
+      throw error;
+    }
+    payload.defaultPassMark = value;
+  }
+  return payload;
+};
+
 // CREATE
 const createDepartment = async (req, res) => {
   try {
-    const department = await Department.create(req.body);
+    const department = await Department.create(departmentPayload(req.body));
 
     res.status(201).json(department);
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }
@@ -52,7 +66,7 @@ const updateDepartment = async (req, res) => {
   try {
     const department = await Department.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      departmentPayload(req.body),
       {
         new: true,
       }
@@ -66,7 +80,7 @@ const updateDepartment = async (req, res) => {
 
     res.json(department);
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }

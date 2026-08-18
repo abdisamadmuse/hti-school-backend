@@ -31,6 +31,26 @@ const protect = async (req, res, next) => {
   }
 };
 
+const authorize = (...allowedRoles) => (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      message: "Not authorized",
+    });
+  }
+
+  if (!allowedRoles.includes(req.user.role)) {
+    return res.status(403).json({
+      message: "You do not have permission to perform this action",
+    });
+  }
+
+  next();
+};
+
+const examManagerOnly = authorize("SuperAdmin", "ExamManager");
+
 module.exports = {
   protect,
+  authorize,
+  examManagerOnly,
 };

@@ -1,4 +1,29 @@
 const Student = require("../models/Student");
+const ClassSection = require("../../classSections/models/ClassSection");
+
+const validateClassSection = async (data, currentStudent = null) => {
+  if (
+    currentStudent &&
+    data.classId !== undefined &&
+    String(data.classId) !== String(currentStudent.classId) &&
+    data.classSectionId === undefined
+  ) {
+    data.classSectionId = null;
+    return;
+  }
+
+  if (data.classSectionId === undefined || data.classSectionId === null || data.classSectionId === "") {
+    return;
+  }
+
+  const section = await ClassSection.findById(data.classSectionId);
+  const classId = data.classId || currentStudent?.classId;
+  if (!section || String(section.classId) !== String(classId)) {
+    const error = new Error("Class section does not belong to the selected class");
+    error.status = 400;
+    throw error;
+  }
+};
 
 const buildFileUrl = (req, file) =>
   `${req.protocol}://${req.get("host")}/uploads/students/${file.destination
@@ -29,6 +54,7 @@ const addUploadedFileUrls = (req) => {
 exports.createStudent = async (req, res) => {
   try {
     addUploadedFileUrls(req);
+    await validateClassSection(req.body);
 
     const student = await Student.create(req.body);
 
@@ -37,7 +63,7 @@ exports.createStudent = async (req, res) => {
       data: student,
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }
@@ -51,6 +77,7 @@ exports.getStudents = async (req, res) => {
       .populate("programId")
       .populate("departmentId")
       .populate("classId")
+      .populate("classSectionId")
       .sort({ createdAt: -1 });
 
     res.status(200).json({
@@ -71,7 +98,8 @@ exports.getStudentById = async (req, res) => {
       .populate("academicYearId")
       .populate("programId")
       .populate("departmentId")
-      .populate("classId");
+      .populate("classId")
+      .populate("classSectionId");
 
     if (!student) {
       return res.status(404).json({
@@ -93,6 +121,13 @@ exports.getStudentById = async (req, res) => {
 exports.updateStudent = async (req, res) => {
   try {
     addUploadedFileUrls(req);
+    const currentStudent = await Student.findById(req.params.id);
+
+    if (!currentStudent) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    await validateClassSection(req.body, currentStudent);
 
     const student = await Student.findByIdAndUpdate(
       req.params.id,
@@ -105,7 +140,8 @@ exports.updateStudent = async (req, res) => {
       .populate("academicYearId")
       .populate("programId")
       .populate("departmentId")
-      .populate("classId");
+      .populate("classId")
+      .populate("classSectionId");
 
     if (!student) {
       return res.status(404).json({
@@ -118,7 +154,7 @@ exports.updateStudent = async (req, res) => {
       data: student,
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }
@@ -148,12 +184,16 @@ exports.deleteStudent = async (req, res) => {
 // Get Students By Class
 exports.getStudentsByClass = async (req, res) => {
   try {
-    const students = await Student.find({
+    const filters = {
       classId: req.params.classId,
       isActive: true,
-    })
+    };
+    if (req.query.classSectionId) filters.classSectionId = req.query.classSectionId;
+
+    const students = await Student.find(filters)
       .populate("departmentId")
       .populate("classId")
+      .populate("classSectionId")
       .sort({ fullName: 1 });
 
     res.status(200).json({
