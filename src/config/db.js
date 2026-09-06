@@ -43,6 +43,28 @@ const addOptionalColumns = async () => {
     }
   }
 
+  if (tableNames.has("attendances")) {
+    await queryInterface.changeColumn("attendances", "status", {
+      type: DataTypes.ENUM("Present", "Absent", "Late", "Permission"),
+      allowNull: false,
+    });
+  }
+
+  if (tableNames.has("users")) {
+    await queryInterface.changeColumn("users", "role", {
+      type: DataTypes.ENUM(
+        "SuperAdmin",
+        "Director",
+        "DeputyDirector",
+        "StudentAffairs",
+        "HeadDepartment",
+        "AttendanceTaker",
+        "ExamManager"
+      ),
+      allowNull: false,
+    });
+  }
+
   if (!tableNames.has("legacyresultstudents")) return;
 
   const legacyStudentColumns = await queryInterface.describeTable("legacyresultstudents");
@@ -67,17 +89,49 @@ const addOptionalColumns = async () => {
 };
 
 module.exports = async function connectDB() {
+  let stage = "initialize models";
   try {
     initializeModels();
+    stage = "authenticate";
     await sequelize.authenticate();
     // Upgrade existing tables before sync creates indexes that use new columns.
     // On a fresh database this is a no-op; sync creates the complete schema.
+    stage = "upgrade existing columns";
     await addOptionalColumns();
+    stage = "sync schema";
     await sequelize.sync();
+    stage = "upgrade columns after sync";
     await addOptionalColumns();
+    // Older records predate academic-year scoping. When there is exactly one active
+    // year, safely attach only unscoped classes and teachers to it.
+    stage = "backfill academic years";
+    const models = initializeModels();
+    const activeYears = await models.AcademicYear.findAll({ where: { isActive: true } });
+    if (activeYears.length === 1) {
+      const activeYearId = activeYears[0].id;
+      await models.Class.update({ academicYearId: activeYearId }, { where: { academicYearId: null } });
+      await models.Teacher.update({ academicYearId: activeYearId }, { where: { academicYearId: null } });
+    }
     console.log("MySQL Connected Successfully");
   } catch (error) {
-    console.error("MySQL Connection Failed:", error.message);
+    // Nested connection errors can have an empty message (e.g. AggregateError).
+    // Log only diagnostic fields, never SQL, connection options, or credentials.
+    const seen = new Set();
+    const describe = (failure) => {
+      if (!failure || typeof failure !== "object" || seen.has(failure)) return undefined;
+      seen.add(failure);
+      const details = {};
+      for (const key of ["name", "code", "errno", "syscall", "address", "port", "sqlState"]) {
+        if (["string", "number"].includes(typeof failure[key])) details[key] = failure[key];
+      }
+      for (const key of ["cause", "original", "parent"]) {
+        const nested = describe(failure[key]);
+        if (nested) details[key] = nested;
+      }
+      if (Array.isArray(failure.errors)) details.errors = failure.errors.map(describe).filter(Boolean);
+      return details;
+    };
+    console.error("MySQL Connection Failed:", JSON.stringify({ stage, error: describe(error) }));
     process.exit(1);
   }
 };
