@@ -1,3 +1,4 @@
+const { calculateMark } = require("./assessment");
 const ExcelJS = require("exceljs");
 const { Op } = require("sequelize");
 const {
@@ -5,7 +6,7 @@ const {
   initializeModels,
 } = require("../../../config/mysql");
 
-const TEMPLATE_VERSION = "1.0";
+const TEMPLATE_VERSION = "1.1";
 const HEADER_ROW = 5;
 const VALID_STATUSES = ["Present", "Absent", "Exempted"];
 
@@ -40,6 +41,7 @@ const readHeaders = (sheet) => {
     else if (value === "Student Name") headers.studentName = column;
     else if (value.startsWith("Theory Mark")) headers.theoryMark = column;
     else if (value.startsWith("Practical Mark")) headers.practicalMark = column;
+    else if (value.startsWith("Monthly Assessment")) headers.monthlyAssessmentMark = column;
     else if (value.startsWith("Total")) headers.total = column;
     else if (value === "Mark Status") headers.markStatus = column;
     else if (value === "Remarks") headers.remarks = column;
@@ -94,7 +96,7 @@ const parseWorkbook = async (buffer) => {
 
 const validateTemplate = (metadata, headers) => {
   const errors = [];
-  if (text(metadata["Template Version"]) !== TEMPLATE_VERSION) {
+  if (!["1.0", TEMPLATE_VERSION].includes(text(metadata["Template Version"]))) {
     errors.push(`Template Version must be ${TEMPLATE_VERSION}`);
   }
   ["Exam ID", "Class ID", "Subject ID"].forEach((field) => {
@@ -213,53 +215,21 @@ const validateRows = ({ marksSheet, headers, context }) => {
       rowErrors.push("Student name does not match the system record");
     }
 
-    const theoryMark = theoryEnabled
-      ? numberOrNull(rowValue(excelRow, headers.theoryMark))
-      : null;
-    const practicalMark = practicalEnabled
-      ? numberOrNull(rowValue(excelRow, headers.practicalMark))
-      : null;
-    const rawStatus = text(rowValue(excelRow, headers.markStatus));
-    const markStatus = rawStatus || "Present";
-    const remarks = text(rowValue(excelRow, headers.remarks));
-
-    if (!VALID_STATUSES.includes(markStatus)) {
-      rowErrors.push("Mark Status must be Present, Absent or Exempted");
-    }
-    if (markStatus === "Present") {
-      if (theoryEnabled && theoryMark === null) rowErrors.push("Theory mark is required");
-      if (practicalEnabled && practicalMark === null) rowErrors.push("Practical mark is required");
-    } else if (theoryMark !== null || practicalMark !== null) {
-      rowErrors.push(`${markStatus} students cannot have marks`);
-    }
-    if (Number.isNaN(theoryMark) || (theoryMark !== null && (theoryMark < 0 || theoryMark > theoryMax))) {
-      rowErrors.push(`Theory mark must be between 0 and ${theoryMax}`);
-    }
-    if (
-      Number.isNaN(practicalMark) ||
-      (practicalMark !== null &&
-        (practicalMark < 0 || practicalMark > practicalMax))
-    ) {
-      rowErrors.push(`Practical mark must be between 0 and ${practicalMax}`);
-    }
-
-    const totalMark =
-      markStatus === "Present"
-        ? Number(theoryMark || 0) + Number(practicalMark || 0)
-        : null;
-    const percentage =
-      totalMark === null ? null : Number(((totalMark / totalMax) * 100).toFixed(2));
-    const resultStatus =
-      markStatus === "Present"
-        ? totalMark >= passMark
-          ? "Pass"
-          : "Fail"
-        : markStatus;
+    const calculation = calculateMark({
+      theoryMark: rowValue(excelRow, headers.theoryMark),
+      practicalMark: rowValue(excelRow, headers.practicalMark),
+      monthlyAssessmentMark: rowValue(excelRow, headers.monthlyAssessmentMark),
+      markStatus: text(rowValue(excelRow, headers.markStatus)) || "Present",
+      remarks: text(rowValue(excelRow, headers.remarks)),
+    }, context.examSubject);
+    rowErrors.push(...calculation.errors);
+    const { theoryMark, practicalMark, monthlyAssessmentMark, totalMark, percentage, resultStatus, remarks } = calculation.values;
     const existing = existingMap.get(studentId);
     const hasChanges =
       !existing ||
       changed(existing.theoryMark, theoryMark) ||
       changed(existing.practicalMark, practicalMark) ||
+      changed(existing.monthlyAssessmentMark, monthlyAssessmentMark) ||
       changed(existing.totalMark, totalMark) ||
       existing.resultStatus !== resultStatus ||
       text(existing.remarks) !== remarks;
@@ -272,6 +242,7 @@ const validateRows = ({ marksSheet, headers, context }) => {
       studentName: rawStudentName,
       theoryMark,
       practicalMark,
+      monthlyAssessmentMark,
       totalMark,
       percentage,
       resultStatus,
@@ -305,6 +276,20 @@ const inspectExcel = async (buffer) => {
   }
   const context = await loadContext(parsed.metadata);
   const validation = validateRows({ ...parsed, context });
+  const config = context.examSubject;
+  const comparisons = [["Theory Maximum", config.theoryMaxMarks], ["Practical Maximum", config.practicalMaxMarks], ["Total Maximum", config.totalMaxMarks], ["Pass Mark", config.passMark]];
+  if (text(parsed.metadata["Template Version"]) === "1.1") {
+    comparisons.push(["Has Theory", Boolean(config.hasTheory)], ["Has Practical", Boolean(config.hasPractical)], ["Has Monthly Assessment", Boolean(config.hasMonthlyAssessment)], ["Monthly Assessment Maximum", Number(config.monthlyAssessmentMaxMarks || 0)]);
+  } else if (config.hasMonthlyAssessment) validation.errors.push({ row: null, message: "Download a new template for monthly assessment" });
+  for (const [key, value] of comparisons) {
+    const actual = parsed.metadata[key];
+    const matches = typeof value === "boolean" ? actual === value : actual !== undefined && actual !== null && Number(actual) === Number(value);
+    if (!matches) validation.errors.push({ row: null, message: key + " configuration changed; download a new template" });
+  }
+  if (Boolean(config.hasMonthlyAssessment) !== Boolean(parsed.headers.monthlyAssessmentMark)) validation.errors.push({ row: HEADER_ROW, message: "Monthly Assessment column does not match configuration" });
+  for (const [key, label, maximum] of [["theoryMark", "Theory Mark", config.theoryMaxMarks], ["practicalMark", "Practical Mark", config.practicalMaxMarks], ["monthlyAssessmentMark", "Monthly Assessment", config.monthlyAssessmentMaxMarks]]) {
+    if (parsed.headers[key] && text(parsed.marksSheet.getRow(HEADER_ROW).getCell(parsed.headers[key]).value) !== label + " (Max " + maximum + ")") validation.errors.push({ row: HEADER_ROW, message: label + " heading changed" });
+  }
   return { ...validation, context, metadata: parsed.metadata };
 };
 
@@ -319,6 +304,8 @@ const previewResponse = (inspection) => ({
     subjectId: inspection.context.examSubject.subjectId,
     theoryMaxMarks: Number(inspection.context.examSubject.theoryMaxMarks),
     practicalMaxMarks: Number(inspection.context.examSubject.practicalMaxMarks),
+    hasMonthlyAssessment: Boolean(inspection.context.examSubject.hasMonthlyAssessment),
+    monthlyAssessmentMaxMarks: Number(inspection.context.examSubject.monthlyAssessmentMaxMarks || 0),
     totalMaxMarks: Number(inspection.context.examSubject.totalMaxMarks),
     passMark: Number(inspection.context.examSubject.passMark),
   },
@@ -361,6 +348,7 @@ const importExcel = async (inspection, fileName, userId) => {
         subjectId: examSubject.subjectId,
         theoryMark: row.theoryMark,
         practicalMark: row.practicalMark,
+        monthlyAssessmentMark: row.monthlyAssessmentMark,
         totalMark: row.totalMark,
         percentage: row.percentage,
         grade: null,
@@ -384,6 +372,8 @@ const importExcel = async (inspection, fileName, userId) => {
             newTheoryMark: row.theoryMark,
             oldPracticalMark: row.existing.practicalMark,
             newPracticalMark: row.practicalMark,
+            oldMonthlyAssessmentMark: row.existing.monthlyAssessmentMark,
+            newMonthlyAssessmentMark: row.monthlyAssessmentMark,
             oldTotalMark: row.existing.totalMark,
             newTotalMark: row.totalMark,
             reason: "Excel re-import",

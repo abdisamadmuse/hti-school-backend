@@ -66,7 +66,10 @@ exports.getStudentResults = async (req, res) => {
     const models = initializeModels();
     const student = await models.Student.findByPk(req.params.studentId);
     if (!student) return res.status(404).json({ message: "Student not found" });
-    assertDepartmentAccess(req.user, student.departmentId);
+    // Authenticated department heads are scoped by middleware on protected
+    // result routes. This read-only endpoint is also used by the public student
+    // profile, where no user is attached to the request.
+    if (req.user) assertDepartmentAccess(req.user, student.departmentId);
     const summaryWhere = { studentId: student.id };
     if (req.query.examId) summaryWhere.examId = req.query.examId;
     const summaries = await models.ResultSummary.findAll({

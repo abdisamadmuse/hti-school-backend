@@ -21,8 +21,8 @@ const refs = {
   Subject: { departmentId: "Department" },
   Teacher: { departmentId: "Department", academicYearId: "AcademicYear" },
   Term: { academicYearId: "AcademicYear" },
-  User: { departmentId: "Department", departmentIds: "Department" },
-  Attendance: { studentId: "Student", academicYearId: "AcademicYear", termId: "Term", classId: "Class", departmentId: "Department", takenBy: "User" },
+  User: { departmentId: "Department", departmentIds: "Department", teacherId: "Teacher" },
+  Attendance: { studentId: "Student", academicYearId: "AcademicYear", termId: "Term", classId: "Class", departmentId: "Department", subjectId: "Subject", takenBy: "User" },
   TeacherAssignment: { teacherId: "Teacher", subjectId: "Subject", classId: "Class", departmentId: "Department", academicYearId: "AcademicYear", termId: "Term" },
   Exam: { academicYearId: "AcademicYear", termId: "Term", createdBy: "User" },
   ExamSubject: { examId: "Exam", classId: "Class", subjectId: "Subject", departmentId: "Department" },
@@ -44,6 +44,9 @@ const refs = {
   TemporaryAnnualStudent: { batchId: "TemporaryAnnualBatch" },
   TemporaryAnnualMark: { studentResultId: "TemporaryAnnualStudent", subjectId: "TemporaryAnnualSubject" },
   DisciplineRecord: { studentId: "Student", academicYearId: "AcademicYear", classId: "Class", departmentId: "Department", reportedBy: "User", resolvedBy: "User" },
+  TeacherCourseContent: { teacherId: "Teacher", academicYearId: "AcademicYear" },
+  TeacherTermContent: { teacherId: "Teacher", academicYearId: "AcademicYear", termId: "Term" },
+  TeacherMonthlyScheme: { teacherId: "Teacher", academicYearId: "AcademicYear", termId: "Term", termContentId: "TeacherTermContent" },
 };
 
 const S = (allowNull = true, extra = {}) => ({ type: DataTypes.STRING, allowNull, ...extra });
@@ -67,11 +70,16 @@ function initializeModels() {
     Class: { name: S(false), programId: I(false), departmentId: I(false), academicYearId: I(false), shift: E(["Morning", "Afternoon"], "Morning"), isActive: B() },
     ClassSection: { classId: I(false), name: S(false), capacity: I(), isActive: B() },
     Term: { name: E(["Term 1", "Term 2"]), academicYearId: I(false), startDate: D(false), endDate: D(false), isActive: B() },
-    Subject: { name: S(false), code: S(false), subjectType: E(["General", "Core"]), departmentId: I(), hasTheory: B(), hasPractical: B(false), isActive: B() },
+    Subject: { name: S(false), code: S(false), subjectType: E(["General", "Core"]), departmentId: I(), hasTheory: B(), hasPractical: B(false), theoryMaxMarks: N(), practicalMaxMarks: N(), hasMonthlyAssessment: B(false), monthlyAssessmentMaxMarks: N(), passMark: N(), isActive: B() },
     Teacher: { fullName: S(false), gender: E(["Male", "Female"]), phone: S(false, { unique: true }), email: S(true, { unique: true }), address: S(), qualification: S(), teacherType: E(["General", "Core"]), departmentId: I(), academicYearId: I(false), hireDate: D(), photoUrl: S(), isActive: B() },
     Student: { admissionNo: S(false, { unique: true }), fullName: S(false), gender: E(["Male", "Female"]), dateOfBirth: D(), phone: S(), address: S(), parentName: S(false), parentPhone: S(false), parentRelationship: E(["Father", "Mother", "Guardian", "Other"], "Guardian"), academicYearId: I(false), programId: I(false), departmentId: I(false), classId: I(false), classSectionId: I(), photoUrl: S(), notaryDocumentUrl: S(), certificateDocumentUrl: S(), status: E(["Active", "Graduated", "Dropped", "Transferred", "Suspended"], "Active"), isActive: B() },
-    User: { fullName: S(false), email: S(false, { unique: true }), phone: S(false, { unique: true }), password: S(false), role: E(["SuperAdmin", "Director", "DeputyDirector", "HeadDepartment", "AttendanceTaker", "ExamManager"]), departmentId: I(), departmentIds: { type: DataTypes.JSON, defaultValue: [] }, attendanceShift: E(["Morning", "Afternoon", "All"], "All"), isActive: B() },
-    Attendance: { studentId: I(false), academicYearId: I(false), termId: I(), classId: I(false), departmentId: I(false), attendanceDate: D(false), attendanceSession: E(["BeforeBreak", "AfterBreak"], "BeforeBreak"), status: E(["Present", "Absent", "Permission"]), remarks: { type: DataTypes.TEXT, defaultValue: "" }, takenBy: I() },
+    User: { fullName: S(false), email: S(true, { unique: true }), phone: S(false, { unique: true }), password: S(false), role: E(["SuperAdmin", "Director", "DeputyDirector", "StudentAffairs", "HeadDepartment", "AttendanceTaker", "Teacher", "ExamManager"]), departmentId: I(), departmentIds: { type: DataTypes.JSON, defaultValue: [] }, teacherId: { type: DataTypes.INTEGER, allowNull: true, unique: true }, attendanceShift: E(["Morning", "Afternoon", "All"], "All"), isActive: B() },
+    Attendance: { revision: I(false, { defaultValue: 0 }), teacherAssignmentId: I(), lessonId: S(false, { defaultValue: "legacy" }), contextKey: S(true, { unique: true }), studentId: I(false), academicYearId: I(false), termId: I(), classId: I(false), departmentId: I(false), subjectId: { type: DataTypes.INTEGER, allowNull: true }, attendanceDate: D(false), attendanceSession: E(["BeforeBreak", "AfterBreak"], "BeforeBreak"), status: E(["Present", "Absent", "Late", "Permission"]), remarks: { type: DataTypes.TEXT, defaultValue: "" }, takenBy: I() },
+    DailyAttendance: { revision: I(false, { defaultValue: 0 }), contextKey: S(false, { unique: true }), studentId: I(false), academicYearId: I(false), termId: I(false), classId: I(false), departmentId: I(false), attendanceDate: D(false), attendanceSession: E(["BeforeBreak", "AfterBreak"]), status: E(["Present", "Absent", "Late", "Permission"]), remarks: { type: DataTypes.TEXT }, takenBy: I(false) },
+    AttendanceClassAssignment: { userId: I(false), classId: I(false), academicYearId: I(false), termId: I(false), isActive: B() },
+    AttendanceAudit: { kind: S(false), recordId: I(false), actorId: I(false), reason: { type: DataTypes.TEXT }, before: { type: DataTypes.JSON }, after: { type: DataTypes.JSON } },
+    AttendanceSchedule: { kind: E(["daily", "lesson"]), academicYearId: I(false), termId: I(false), classId: I(false), date: { type: DataTypes.DATEONLY, allowNull: false }, session: E(["BeforeBreak", "AfterBreak"]), lessonId: S(false, { defaultValue: "daily" }), teacherAssignmentId: I(), endsAt: D(false), isSchoolDay: B(), source: S(false), contextKey: S(false, { unique: true }) },
+    AttendanceCoverage: { kind: E(["daily", "lesson"]), academicYearId: I(false), termId: I(false), classId: I(false), month: S(false), source: S(false), contextKey: S(false, { unique: true }) },
     TeacherAssignment: { teacherId: I(false), subjectId: I(false), classId: I(false), departmentId: I(false), academicYearId: I(false), termId: I(), isActive: B() },
     Exam: {
       name: S(false),
@@ -91,6 +99,8 @@ function initializeModels() {
       departmentId: I(false),
       hasTheory: B(true),
       hasPractical: B(false),
+      hasMonthlyAssessment: B(false),
+      monthlyAssessmentMaxMarks: N(true, 0),
       theoryMaxMarks: N(false, 0),
       practicalMaxMarks: N(false, 0),
       totalMaxMarks: N(false),
@@ -107,6 +117,7 @@ function initializeModels() {
       subjectId: I(false),
       theoryMark: N(),
       practicalMark: N(),
+      monthlyAssessmentMark: N(),
       totalMark: N(),
       percentage: { type: DataTypes.DECIMAL(6, 2), allowNull: true, validate: { min: 0, max: 100 } },
       grade: S(),
@@ -126,6 +137,8 @@ function initializeModels() {
       newTheoryMark: N(),
       oldPracticalMark: N(),
       newPracticalMark: N(),
+      oldMonthlyAssessmentMark: N(),
+      newMonthlyAssessmentMark: N(),
       oldTotalMark: N(),
       newTotalMark: N(),
       reason: { type: DataTypes.TEXT, allowNull: true },
@@ -243,10 +256,26 @@ function initializeModels() {
       severity: E(["Low", "Medium", "High", "Critical"], "Medium"), actionTaken: { type: DataTypes.TEXT },
       status: E(["Open", "Resolved"], "Open"), notes: { type: DataTypes.TEXT }, reportedBy: I(false), resolvedBy: I(), resolvedAt: D(),
     },
+    TeacherCourseContent: {
+      teacherId: I(false), academicYearId: I(false), month: I(false), courseTitle: S(false),
+      content: { type: DataTypes.TEXT, allowNull: false }, schemeOfWorkUrl: S(), originalFileName: S(), isActive: B(),
+    },
+    TeacherTermContent: {
+      teacherId: I(false), academicYearId: I(false), termId: I(false), courseTitle: S(false),
+      chaptersTopics: { type: DataTypes.TEXT, allowNull: false }, documentUrl: S(), originalFileName: S(), isActive: B(),
+    },
+    TeacherMonthlyScheme: {
+      teacherId: I(false), academicYearId: I(false), termId: I(false), termContentId: I(false), month: I(false),
+      teachingPlan: { type: DataTypes.TEXT, allowNull: false }, documentUrl: S(), originalFileName: S(), isActive: B(),
+    },
   };
   for (const [name, attributes] of Object.entries(definitions)) {
     const indexes = [];
-    if (name === "Attendance") indexes.push({ name: "uq_attendance_entry", unique: true, fields: ["studentId", "attendanceDate", "classId", "attendanceSession"] });
+    if (name === "AttendanceClassAssignment") indexes.push({ name: "uq_attendance_class_user", unique: true, fields: ["userId", "classId", "academicYearId", "termId"] });
+    if (name === "Student") indexes.push(
+      { name: "idx_student_scope_active", fields: ["departmentId", "classId", "academicYearId", "isActive"] },
+      { name: "idx_student_full_name", fields: ["fullName"] }
+    );
     if (name === "Subject") indexes.push({ name: "uq_subject_code_department", unique: true, fields: ["code", "departmentId"] });
     if (name === "ClassSection") indexes.push({ name: "uq_class_section_name", unique: true, fields: ["classId", "name"] });
     if (name === "TeacherAssignment") indexes.push({ name: "uq_teacher_assignment", unique: true, fields: ["teacherId", "subjectId", "classId", "academicYearId", "termId"] });
@@ -277,6 +306,11 @@ function initializeModels() {
       { name: "idx_discipline_student_date", fields: ["studentId", "incidentDate"] },
       { name: "idx_discipline_department_status", fields: ["departmentId", "status"] }
     );
+    if (name === "TeacherCourseContent") indexes.push(
+      { name: "idx_teacher_content_scope", fields: ["teacherId", "academicYearId", "month"] }
+    );
+    if (name === "TeacherTermContent") indexes.push({ name: "uq_teacher_term_course", unique: true, fields: ["teacherId", "academicYearId", "termId", "courseTitle"] });
+    if (name === "TeacherMonthlyScheme") indexes.push({ name: "uq_teacher_monthly_scheme", unique: true, fields: ["termContentId", "month"] });
     const options = { tableName: `${name.toLowerCase()}s`, indexes };
     if (name === "Exam") {
       options.validate = {
@@ -297,7 +331,7 @@ function initializeModels() {
           if (!this.hasTheory && !this.hasPractical) throw new Error("An exam subject must have theory or practical marks");
           if (!this.hasTheory && theory !== 0) throw new Error("Theory maximum must be zero when theory is disabled");
           if (!this.hasPractical && practical !== 0) throw new Error("Practical maximum must be zero when practical is disabled");
-          if (total <= 0 || total !== theory + practical) throw new Error("Total maximum must equal theory plus practical maximum marks");
+          if (total <= 0 || total !== Number(((this.hasTheory ? theory : 0) + (this.hasPractical ? practical : 0) + (this.hasMonthlyAssessment ? Number(this.monthlyAssessmentMaxMarks) : 0)).toFixed(2))) throw new Error("Total maximum must equal the enabled component maxima");
           if (pass > total) throw new Error("Pass mark cannot exceed total maximum marks");
         },
       };
@@ -326,7 +360,7 @@ function where(input = {}) {
       if (value.$in) x[Op.in] = value.$in;
       if (value.$gte !== undefined) x[Op.gte] = value.$gte;
       if (value.$lt !== undefined) x[Op.lt] = value.$lt;
-      out[key] = Object.keys(x).length ? x : value;
+      out[key] = Reflect.ownKeys(x).length ? x : value;
     } else out[key] = value;
   }
   return out;

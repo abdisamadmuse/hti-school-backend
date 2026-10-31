@@ -102,11 +102,14 @@ exports.getMarks = async (req, res) => {
     ]);
     const studentMap = new Map(students.map((item) => [item.id, plain(item)]));
     const subjectMap = new Map(subjects.map((item) => [item.id, plain(item)]));
+    const configurations = await models.ExamSubject.findAll({ where: { id: { [Op.in]: [...new Set(marks.map((mark) => mark.examSubjectId))] } } });
+    const configurationMap = new Map(configurations.map((item) => [item.id, plain(item)]));
 
     res.status(200).json({
       count: marks.length,
       data: marks.map((mark) => ({
         ...plain(mark),
+        configuration: configurationMap.get(mark.examSubjectId) || null,
         student: studentMap.get(mark.studentId) || null,
         subject: subjectMap.get(mark.subjectId) || null,
       })),
@@ -137,6 +140,7 @@ exports.updateMark = async (req, res) => {
         {
           theoryMark: currentMark.theoryMark,
           practicalMark: currentMark.practicalMark,
+          monthlyAssessmentMark: currentMark.monthlyAssessmentMark,
           markStatus: ["Absent", "Exempted"].includes(currentMark.resultStatus)
             ? currentMark.resultStatus
             : "Present",

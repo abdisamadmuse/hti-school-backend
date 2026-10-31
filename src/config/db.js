@@ -43,6 +43,47 @@ const addOptionalColumns = async () => {
     }
   }
 
+  if (tableNames.has("users")) {
+    const userColumns = await queryInterface.describeTable("users");
+    if (userColumns.email && userColumns.email.allowNull === false) {
+      await queryInterface.changeColumn("users", "email", {
+        type: DataTypes.STRING,
+        allowNull: true,
+        unique: true,
+      });
+    }
+    if (!userColumns.teacherId) {
+      await queryInterface.addColumn("users", "teacherId", {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        unique: true,
+      });
+    }
+  }
+
+  if (tableNames.has("attendances")) {
+    const attendanceColumns = await queryInterface.describeTable("attendances");
+    if (!attendanceColumns.subjectId) {
+      await queryInterface.addColumn("attendances", "subjectId", {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      });
+    }
+
+    const indexes = await queryInterface.showIndex("attendances");
+    const attendanceIndex = indexes.find((index) => index.name === "uq_attendance_entry");
+    const hasSubjectScope = attendanceIndex?.fields?.some((field) => field.attribute === "subjectId" || field.name === "subjectId");
+    if (attendanceIndex && !hasSubjectScope) {
+      await queryInterface.removeIndex("attendances", "uq_attendance_entry");
+    }
+    if (!hasSubjectScope) {
+      await queryInterface.addIndex("attendances", ["studentId", "attendanceDate", "classId", "attendanceSession", "subjectId"], {
+        name: "uq_attendance_entry",
+        unique: true,
+      });
+    }
+  }
+
   if (tableNames.has("attendances")) {
     await queryInterface.changeColumn("attendances", "status", {
       type: DataTypes.ENUM("Present", "Absent", "Late", "Permission"),
@@ -59,6 +100,7 @@ const addOptionalColumns = async () => {
         "StudentAffairs",
         "HeadDepartment",
         "AttendanceTaker",
+        "Teacher",
         "ExamManager"
       ),
       allowNull: false,
@@ -97,7 +139,9 @@ module.exports = async function connectDB() {
     // Upgrade existing tables before sync creates indexes that use new columns.
     // On a fresh database this is a no-op; sync creates the complete schema.
     stage = "upgrade existing columns";
+    await require("./assessmentMigration")(sequelize);
     await addOptionalColumns();
+    await require("./attendanceMigration")(sequelize);
     stage = "sync schema";
     await sequelize.sync();
     stage = "upgrade columns after sync";

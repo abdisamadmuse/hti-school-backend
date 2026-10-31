@@ -1,3 +1,4 @@
+const { subjectDefaults } = require("../../examMarks/services/assessment");
 const Subject = require("../models/Subject");
 
 // Create Subject
@@ -8,8 +9,6 @@ exports.createSubject = async (req, res) => {
       code,
       subjectType,
       departmentId,
-      hasTheory,
-      hasPractical,
       isActive,
     } = req.body;
 
@@ -30,8 +29,7 @@ exports.createSubject = async (req, res) => {
       code,
       subjectType,
       departmentId: subjectType === "General" ? null : departmentId,
-      hasTheory,
-      hasPractical,
+      ...subjectDefaults(req.body),
       isActive,
     });
 
@@ -40,7 +38,7 @@ exports.createSubject = async (req, res) => {
       data: subject,
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }
@@ -58,7 +56,7 @@ exports.getSubjects = async (req, res) => {
       data: subjects,
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }
@@ -79,7 +77,7 @@ exports.getSubjectById = async (req, res) => {
       data: subject,
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }
@@ -88,7 +86,10 @@ exports.getSubjectById = async (req, res) => {
 // Update Subject
 exports.updateSubject = async (req, res) => {
   try {
-    const { subjectType, departmentId } = req.body;
+    const current = await Subject.findById(req.params.id);
+    if (!current) return res.status(404).json({ message: "Subject not found" });
+    const merged = { ...current, ...req.body };
+    const { subjectType, departmentId } = merged;
 
     if (subjectType === "Core" && !departmentId) {
       return res.status(400).json({
@@ -102,7 +103,9 @@ exports.updateSubject = async (req, res) => {
       });
     }
 
+    const assessmentFields = ["subjectType", "hasTheory", "hasPractical", "theoryMaxMarks", "practicalMaxMarks", "hasMonthlyAssessment", "monthlyAssessmentMaxMarks", "passMark"];
     const updateData = { ...req.body };
+    if (assessmentFields.some((key) => Object.hasOwn(req.body, key))) Object.assign(updateData, subjectDefaults(merged));
 
     if (subjectType === "General") {
       updateData.departmentId = null;
@@ -124,7 +127,7 @@ exports.updateSubject = async (req, res) => {
       data: subject,
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }
@@ -145,7 +148,7 @@ exports.deleteSubject = async (req, res) => {
       message: "Subject deleted successfully",
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }
@@ -164,7 +167,7 @@ exports.getGeneralSubjects = async (req, res) => {
       data: subjects,
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }
@@ -186,7 +189,7 @@ exports.getCoreSubjects = async (req, res) => {
       data: subjects,
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }

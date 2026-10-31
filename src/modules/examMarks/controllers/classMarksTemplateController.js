@@ -2,7 +2,7 @@ const ExcelJS = require("exceljs");
 const { Op } = require("sequelize");
 const { initializeModels } = require("../../../config/mysql");
 
-const CLASS_TEMPLATE_VERSION = "CLASS-1.1";
+const CLASS_TEMPLATE_VERSION = "CLASS-1.2";
 const SUBJECT_HEADER_ROW = 4;
 const COMPONENT_HEADER_ROW = 5;
 const FIRST_DATA_ROW = 6;
@@ -14,7 +14,7 @@ const safeFilePart = (value) =>
     .replace(/[^a-zA-Z0-9_-]+/g, "_")
     .replace(/^_+|_+$/g, "");
 
-const loadClassTemplateData = async ({ examId, classId }) => {
+const loadClassTemplateData = async ({ examId, classId, classSectionId }) => {
   if (!examId || !classId) {
     const error = new Error("examId and classId are required");
     error.status = 400;
@@ -49,12 +49,20 @@ const loadClassTemplateData = async ({ examId, classId }) => {
     error.status = 404;
     throw error;
   }
+  let section = null;
+  if (classSectionId) {
+    section = await models.ClassSection.findByPk(classSectionId);
+    if (!section || Number(section.classId) !== Number(classId) || !section.isActive) {
+      throw Object.assign(new Error("Section does not belong to this class or is inactive"), { status: 400 });
+    }
+  }
   const subjectIds = configurations.map((item) => item.subjectId);
   const [subjects, students, academicYear, term, department] = await Promise.all([
     models.Subject.findAll({ where: { id: { [Op.in]: subjectIds }, isActive: true } }),
     models.Student.findAll({
       where: {
         classId,
+        ...(classSectionId ? { classSectionId } : {}),
         academicYearId: exam.academicYearId,
         status: "Active",
         isActive: true,
@@ -77,6 +85,7 @@ const loadClassTemplateData = async ({ examId, classId }) => {
   }
   const subjectMap = new Map(subjects.map((item) => [item.id, plain(item)]));
   return {
+    section: plain(section),
     exam: plain(exam),
     selectedClass: plain(selectedClass),
     configurations: configurations.map((item) => ({
@@ -96,6 +105,7 @@ const componentColumns = (configurations) => {
     const columns = {};
     if (configuration.hasTheory) columns.theory = column++;
     if (configuration.hasPractical) columns.practical = column++;
+    if (configuration.hasMonthlyAssessment) columns.monthly = column++;
     columns.total = column++;
     return { configuration, columns, first: Math.min(...Object.values(columns)), last: Math.max(...Object.values(columns)) };
   });
@@ -129,7 +139,7 @@ const buildClassMarksWorkbook = async (data) => {
   sheet.getCell(2, 1).value = `${data.academicYear?.name || ""} | ${data.term?.name || ""} | ${data.department?.name || ""}`;
   sheet.getCell(2, 1).alignment = { horizontal: "center" };
   sheet.mergeCells(3, 1, 3, lastColumn);
-  sheet.getCell(3, 1).value = "Enter theory and practical marks only. Do not modify student or subject headings.";
+  sheet.getCell(3, 1).value = "Enter enabled component marks only. Do not modify student or subject headings.";
   sheet.getCell(3, 1).alignment = { horizontal: "center" };
 
   const identityHeaders = ["Student ID", "Admission No", "Student Name"];
@@ -160,6 +170,7 @@ const buildClassMarksWorkbook = async (data) => {
     const labels = {
       theory: `Theory (Max ${Number(configuration.theoryMaxMarks)})`,
       practical: `Practical (Max ${Number(configuration.practicalMaxMarks)})`,
+      monthly: `Monthly Assessment (Max ${Number(configuration.monthlyAssessmentMaxMarks)})`,
       total: `Total (Max ${Number(configuration.totalMaxMarks)})`,
     };
     Object.entries(columns).forEach(([key, column]) => {
@@ -190,6 +201,7 @@ const buildClassMarksWorkbook = async (data) => {
       const markColumns = [];
       if (columns.theory) markColumns.push(sheet.getColumn(columns.theory).letter);
       if (columns.practical) markColumns.push(sheet.getColumn(columns.practical).letter);
+      if (columns.monthly) markColumns.push(sheet.getColumn(columns.monthly).letter);
       Object.entries(columns).forEach(([key, column]) => {
         const cell = row.getCell(column);
         cell.border = border;
@@ -211,6 +223,10 @@ const buildClassMarksWorkbook = async (data) => {
           formulae: [0, Number(configuration.practicalMaxMarks)],
         };
         row.getCell(columns.practical).numFmt = "0.00";
+      }
+      if (columns.monthly) {
+        row.getCell(columns.monthly).dataValidation = { type: "decimal", operator: "between", allowBlank: true, showErrorMessage: true, formulae: [0, Number(configuration.monthlyAssessmentMaxMarks)] };
+        row.getCell(columns.monthly).numFmt = "0.00";
       }
       row.getCell(columns.total).value = {
         formula: `IF(COUNT(${markColumns.map((letter) => `${letter}${rowNumber}`).join(",")})=0,"",SUM(${markColumns.map((letter) => `${letter}${rowNumber}`).join(",")}))`,
@@ -236,6 +252,7 @@ const buildClassMarksWorkbook = async (data) => {
     ["Academic Year ID", data.exam.academicYearId],
     ["Term ID", data.exam.termId],
     ["Class ID", data.selectedClass.id],
+    ["Class Section ID", data.section?.id || ""],
     ["Class", data.selectedClass.name],
     ["Department ID", data.selectedClass.departmentId],
     ["Subject Count", data.configurations.length],
@@ -249,7 +266,7 @@ const buildClassMarksWorkbook = async (data) => {
   const subjectHeaders = [
     "Exam Subject ID", "Subject ID", "Subject Code", "Subject Name", "Has Theory",
     "Has Practical", "Theory Maximum", "Practical Maximum", "Total Maximum", "Pass Mark",
-    "Theory Column", "Practical Column", "Total Column",
+    "Theory Column", "Practical Column", "Total Column", "Has Monthly Assessment", "Monthly Assessment Maximum", "Monthly Assessment Column",
   ];
   subjectInfo.addRow(subjectHeaders);
   layout.forEach(({ configuration, columns }) => {
@@ -259,6 +276,7 @@ const buildClassMarksWorkbook = async (data) => {
       Number(configuration.theoryMaxMarks), Number(configuration.practicalMaxMarks),
       Number(configuration.totalMaxMarks), Number(configuration.passMark),
       columns.theory || "", columns.practical || "", columns.total,
+      Boolean(configuration.hasMonthlyAssessment), Number(configuration.monthlyAssessmentMaxMarks || 0), columns.monthly || "",
     ]);
   });
   subjectInfo.state = "veryHidden";
@@ -269,7 +287,7 @@ const buildClassMarksWorkbook = async (data) => {
     "HTI All Subjects Class Marks Template",
     "1. Do not add, remove, rename or reorder students, subjects, columns or worksheets.",
     "2. Do not change Student ID, Admission No, Student Name or calculated Total cells.",
-    "3. Enter every enabled theory/practical mark within its displayed maximum.",
+    "3. Enter every enabled enabled component mark within its displayed maximum.",
     "4. All imported workbook entries are treated as Present with no remarks.",
     "5. Record Absent or Exempted students through Manual Marks Entry.",
     "6. Save the completed workbook as .xlsx and return it to the Head of Exams.",

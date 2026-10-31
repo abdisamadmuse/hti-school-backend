@@ -6,6 +6,7 @@ const {
 } = require("../controllers/authController");
 
 const router = express.Router();
+const { protect, authorize } = require("../../../middleware/authMiddleware");
 
 /**
  * @openapi
@@ -40,7 +41,7 @@ const router = express.Router();
  *       201:
  *         description: Created
  */
-router.post("/register", registerUser);
+router.post("/register", protect, authorize("SuperAdmin"), registerUser);
 
 /**
  * @openapi

@@ -14,6 +14,9 @@ const options = {
       },
     ],
     components: {
+      securitySchemes: {
+        bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      },
       schemas: {
         User: {
           type: 'object',
@@ -42,7 +45,7 @@ const options = {
       },
     },
   },
-  apis: ['./src/modules/**/routes/*.js', './src/modules/**/controllers/*.js'],
+  apis: ['./src/modules/**/routes/*.js', './src/modules/**/controllers/*.js', './src/modules/dashboard/dashboardRoutes.js'],
 };
 
 const swaggerSpec = swaggerJSDoc(options);

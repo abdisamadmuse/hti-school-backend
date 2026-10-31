@@ -1,3 +1,4 @@
+const { calculateMark } = require("../../examMarks/services/assessment");
 const { Op } = require("sequelize");
 const { sequelize, initializeModels } = require("../../../config/mysql");
 const { assertDepartmentAccess } = require("../../examMarks/services/manualMarkService");
@@ -41,8 +42,8 @@ const loadCalculationContext = async ({ examId, classId }, user) => {
     error.status = 400;
     throw error;
   }
-  if (exam.status === "Draft" || exam.status === "Closed") {
-    const error = new Error("Results can only be calculated for an Open or Published exam");
+  if (exam.status !== "Open") {
+    const error = new Error("Results can only be calculated for an Open exam; unpublish before corrections");
     error.status = 409;
     throw error;
   }
@@ -121,7 +122,13 @@ const calculateStudents = (context) => {
         markUpdates.push({ id: mark.id, grade: null });
         return;
       }
-      const total = Number(mark.totalMark || 0);
+      const verified = calculateMark({ ...mark, markStatus: "Present" }, configuration);
+      if (verified.errors.length) {
+        subjectsMissing += 1;
+        subjectsTaken -= 1;
+        return;
+      }
+      const total = verified.values.totalMark;
       const percentage = Number(
         ((total / Number(configuration.totalMaxMarks)) * 100).toFixed(2)
       );

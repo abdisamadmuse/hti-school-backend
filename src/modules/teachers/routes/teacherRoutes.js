@@ -7,6 +7,7 @@ const {
   updateTeacher,
   deleteTeacher,
   getTeachersByDepartment,
+  createTeacherAttendanceAccount,
 } = require("../controllers/teacherController");
 
 const router = express.Router();
@@ -47,6 +48,8 @@ router.get("/", getTeachers);
  *     summary: Get teachers by department
  */
 router.get("/department/:departmentId", getTeachersByDepartment);
+
+router.post("/:id/attendance-account", createTeacherAttendanceAccount);
 
 /**
  * @openapi

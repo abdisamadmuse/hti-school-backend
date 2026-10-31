@@ -29,6 +29,7 @@ router.patch("/:examId/publish", examManagerOnly, publishExamResults);
 router.patch("/:examId/unpublish", examManagerOnly, unpublishExamResults);
 router.get("/:examId/subjects", getExamSubjects);
 router.post("/:examId/subjects", examManagerOnly, createExamSubject);
+router.get("/:examId/readiness", examManagerOnly, require("../controllers/examController").getReadiness);
 router.get("/:id", getExamById);
 router.post("/", examManagerOnly, createExam);
 router.put("/:id", examManagerOnly, updateExam);

@@ -8,10 +8,14 @@ const {
   deleteStudent,
   getStudentsByClass,
   bulkUploadStudents,
+  downloadBulkTemplate,
 } = require("../controllers/studentController");
 const uploadStudentFiles = require("../middleware/studentUpload");
+const uploadStudentExcel = require("../middleware/studentExcelUpload");
 
 const router = express.Router();
+const { getClassStudentReport } = require("../controllers/classReportController");
+router.get("/class/:classId/report", getClassStudentReport);
 
 /**
  * @openapi
@@ -38,7 +42,8 @@ router.post("/", uploadStudentFiles, createStudent);
  *       - Students
  *     summary: Bulk upload students
  */
-router.post("/bulk-upload", bulkUploadStudents);
+router.get("/bulk-template", downloadBulkTemplate);
+router.post("/bulk-upload", uploadStudentExcel, bulkUploadStudents);
 
 /**
  * @openapi

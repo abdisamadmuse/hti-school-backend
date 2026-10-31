@@ -1,17 +1,9 @@
-const { Op } = require("sequelize");
 const {
   sequelize,
   initializeModels,
 } = require("../../../config/mysql");
 
-const VALID_MARK_STATUSES = ["Present", "Absent", "Exempted"];
-
 const plain = (record) => (record ? record.get({ plain: true }) : null);
-const optionalNumber = (value) => {
-  if (value === undefined || value === null || value === "") return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : NaN;
-};
 const text = (value) => String(value ?? "").trim();
 
 const allowedDepartmentIds = (user) => {
@@ -88,71 +80,7 @@ const loadEntryContext = async ({ examId, classId, subjectId }, user) => {
   };
 };
 
-const calculateMark = (input, examSubject) => {
-  const errors = [];
-  const theoryEnabled = Boolean(examSubject.hasTheory);
-  const practicalEnabled = Boolean(examSubject.hasPractical);
-  const theoryMax = Number(examSubject.theoryMaxMarks);
-  const practicalMax = Number(examSubject.practicalMaxMarks);
-  const totalMax = Number(examSubject.totalMaxMarks);
-  const passMark = Number(examSubject.passMark);
-  const theoryMark = theoryEnabled ? optionalNumber(input.theoryMark) : null;
-  const practicalMark = practicalEnabled
-    ? optionalNumber(input.practicalMark)
-    : null;
-  const markStatus = text(input.markStatus) || "Present";
-
-  if (!VALID_MARK_STATUSES.includes(markStatus)) {
-    errors.push("markStatus must be Present, Absent or Exempted");
-  }
-  if (markStatus === "Present") {
-    if (theoryEnabled && theoryMark === null) errors.push("theoryMark is required");
-    if (practicalEnabled && practicalMark === null) {
-      errors.push("practicalMark is required");
-    }
-  } else if (theoryMark !== null || practicalMark !== null) {
-    errors.push(`${markStatus} students cannot have marks`);
-  }
-  if (
-    Number.isNaN(theoryMark) ||
-    (theoryMark !== null && (theoryMark < 0 || theoryMark > theoryMax))
-  ) {
-    errors.push(`theoryMark must be between 0 and ${theoryMax}`);
-  }
-  if (
-    Number.isNaN(practicalMark) ||
-    (practicalMark !== null &&
-      (practicalMark < 0 || practicalMark > practicalMax))
-  ) {
-    errors.push(`practicalMark must be between 0 and ${practicalMax}`);
-  }
-
-  const totalMark =
-    markStatus === "Present"
-      ? Number(theoryMark || 0) + Number(practicalMark || 0)
-      : null;
-  const percentage =
-    totalMark === null ? null : Number(((totalMark / totalMax) * 100).toFixed(2));
-  const resultStatus =
-    markStatus === "Present"
-      ? totalMark >= passMark
-        ? "Pass"
-        : "Fail"
-      : markStatus;
-
-  return {
-    errors,
-    values: {
-      theoryMark,
-      practicalMark,
-      totalMark,
-      percentage,
-      grade: null,
-      resultStatus,
-      remarks: text(input.remarks),
-    },
-  };
-};
+const { calculateMark } = require("./assessment");
 
 const valueChanged = (left, right) => {
   const normalized = (value) =>
@@ -168,6 +96,7 @@ const markChanged = (existing, values) =>
   !existing ||
   valueChanged(existing.theoryMark, values.theoryMark) ||
   valueChanged(existing.practicalMark, values.practicalMark) ||
+  valueChanged(existing.monthlyAssessmentMark, values.monthlyAssessmentMark) ||
   valueChanged(existing.totalMark, values.totalMark) ||
   existing.resultStatus !== values.resultStatus ||
   text(existing.remarks) !== values.remarks;
@@ -262,6 +191,8 @@ const saveEntries = async (context, validated, userId) => {
             newTheoryMark: row.values.theoryMark,
             oldPracticalMark: row.current.practicalMark,
             newPracticalMark: row.values.practicalMark,
+            oldMonthlyAssessmentMark: row.current.monthlyAssessmentMark,
+            newMonthlyAssessmentMark: row.values.monthlyAssessmentMark,
             oldTotalMark: row.current.totalMark,
             newTotalMark: row.values.totalMark,
             reason: row.reason,

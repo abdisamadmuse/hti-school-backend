@@ -1,3 +1,4 @@
+const { calculateMark } = require("./assessment");
 const ExcelJS = require("exceljs");
 const { Op } = require("sequelize");
 const { sequelize, initializeModels } = require("../../../config/mysql");
@@ -61,6 +62,11 @@ const readSubjectConfiguration = (sheet) => {
     error.status = 400;
     throw error;
   }
+  const monthlyHeaders = ["Has Monthly Assessment", "Monthly Assessment Maximum", "Monthly Assessment Column"];
+  const hasMonthlyColumns = monthlyHeaders.some((_, i) => sheet.getRow(1).getCell(14 + i).value != null);
+  if (hasMonthlyColumns && monthlyHeaders.some((label, i) => text(sheet.getRow(1).getCell(14 + i).value) !== label)) {
+    const error = new Error("Monthly assessment metadata headers were modified"); error.status = 400; throw error;
+  }
   const rows = [];
   for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
     const row = sheet.getRow(rowNumber);
@@ -76,7 +82,10 @@ const readSubjectConfiguration = (sheet) => {
       practicalMaxMarks: Number(row.getCell(8).value),
       totalMaxMarks: Number(row.getCell(9).value),
       passMark: Number(row.getCell(10).value),
+      hasMonthlyAssessment: booleanValue(row.getCell(14).value),
+      monthlyAssessmentMaxMarks: Number(row.getCell(15).value || 0),
       columns: {
+        monthly: numericId(row.getCell(16).value),
         theory: numericId(row.getCell(11).value),
         practical: numericId(row.getCell(12).value),
         total: numericId(row.getCell(13).value),
@@ -113,7 +122,7 @@ const parseClassWorkbook = async (buffer) => {
 const validateMetadata = (metadata, templateSubjects) => {
   const errors = [];
   if (text(metadata["Template Type"]) !== "All Subjects Class Marks") errors.push("Template Type is invalid");
-  if (text(metadata["Template Version"]) !== CLASS_TEMPLATE_VERSION) errors.push(`Template Version must be ${CLASS_TEMPLATE_VERSION}`);
+  if (!["CLASS-1.1", CLASS_TEMPLATE_VERSION].includes(text(metadata["Template Version"]))) errors.push(`Template Version must be ${CLASS_TEMPLATE_VERSION}`);
   if (!numericId(metadata["Exam ID"])) errors.push("Exam ID is missing or invalid");
   if (!numericId(metadata["Class ID"])) errors.push("Class ID is missing or invalid");
   if (Number(metadata["Subject Count"]) !== templateSubjects.length) errors.push("Subject Count does not match the workbook configuration");
@@ -152,12 +161,19 @@ const loadClassImportContext = async (metadata) => {
     error.status = 404;
     throw error;
   }
+  const classSectionId = numericId(metadata["Class Section ID"]);
+  if (metadata["Class Section ID"] && !classSectionId) throw Object.assign(new Error("Invalid class section"), { status: 400 });
+  if (classSectionId) {
+    const section = await models.ClassSection.findByPk(classSectionId);
+    if (!section || Number(section.classId) !== classId || !section.isActive) throw Object.assign(new Error("Section does not belong to this class or is inactive"), { status: 400 });
+  }
   const subjectIds = configurations.map((item) => item.subjectId);
   const [subjects, students, existingMarks] = await Promise.all([
     models.Subject.findAll({ where: { id: { [Op.in]: subjectIds }, isActive: true } }),
     models.Student.findAll({
       where: {
         classId,
+        ...(classSectionId ? { classSectionId } : {}),
         academicYearId: exam.academicYearId,
         status: "Active",
         isActive: true,
@@ -209,6 +225,8 @@ const validateSubjectLayout = (marksSheet, templateSubjects, context) => {
       [Boolean(database.hasPractical), template.hasPractical, "Practical configuration changed"],
       [Number(database.theoryMaxMarks), template.theoryMaxMarks, "Theory maximum changed"],
       [Number(database.practicalMaxMarks), template.practicalMaxMarks, "Practical maximum changed"],
+      [Boolean(database.hasMonthlyAssessment), template.hasMonthlyAssessment, "Monthly assessment configuration changed"],
+      [Number(database.monthlyAssessmentMaxMarks || 0), template.monthlyAssessmentMaxMarks, "Monthly assessment maximum changed"],
       [Number(database.totalMaxMarks), template.totalMaxMarks, "Total maximum changed"],
       [Number(database.passMark), template.passMark, "Pass mark changed"],
     ];
@@ -221,6 +239,8 @@ const validateSubjectLayout = (marksSheet, templateSubjects, context) => {
     const expectedColumns = {};
     if (database.hasTheory) expectedColumns.theory = expectedColumn++;
     if (database.hasPractical) expectedColumns.practical = expectedColumn++;
+    if (database.hasMonthlyAssessment) expectedColumns.monthly = expectedColumn++;
+    else if (template.columns.monthly) add("Unexpected Monthly Assessment column");
     expectedColumns.total = expectedColumn++;
     Object.entries(expectedColumns).forEach(([key, column]) => {
       if (template.columns[key] !== column) add(`${key} column was moved`, COMPONENT_HEADER_ROW, template.columns[key]);
@@ -232,6 +252,7 @@ const validateSubjectLayout = (marksSheet, templateSubjects, context) => {
       const expected =
         key === "theory" ? `Theory (Max ${Number(database.theoryMaxMarks)})` :
         key === "practical" ? `Practical (Max ${Number(database.practicalMaxMarks)})` :
+        key === "monthly" ? `Monthly Assessment (Max ${Number(database.monthlyAssessmentMaxMarks)})` :
         `Total (Max ${Number(database.totalMaxMarks)})`;
       if (text(marksSheet.getRow(COMPONENT_HEADER_ROW).getCell(column).value) !== expected) add(`${key} column heading was changed`, COMPONENT_HEADER_ROW, column);
     });
@@ -295,23 +316,18 @@ const validateClassRows = (marksSheet, templateSubjects, context) => {
         subjectCode: subject.code,
         subject: subject.name,
       };
-      const theoryMark = configuration.hasTheory ? numberOrNull(rowValue(excelRow, template.columns.theory)) : null;
-      const practicalMark = configuration.hasPractical ? numberOrNull(rowValue(excelRow, template.columns.practical)) : null;
-      const markStatus = "Present";
-      const remarks = "";
-      const cellErrors = [];
-      if (configuration.hasTheory && theoryMark === null) cellErrors.push("Theory mark is required");
-      if (configuration.hasPractical && practicalMark === null) cellErrors.push("Practical mark is required");
-      if (Number.isNaN(theoryMark) || (theoryMark !== null && (theoryMark < 0 || theoryMark > Number(configuration.theoryMaxMarks)))) cellErrors.push(`Theory mark must be between 0 and ${Number(configuration.theoryMaxMarks)}`);
-      if (Number.isNaN(practicalMark) || (practicalMark !== null && (practicalMark < 0 || practicalMark > Number(configuration.practicalMaxMarks)))) cellErrors.push(`Practical mark must be between 0 and ${Number(configuration.practicalMaxMarks)}`);
-      cellErrors.forEach((message) => errors.push({ ...errorContext, message }));
-      const totalMark = Number(theoryMark || 0) + Number(practicalMark || 0);
-      const percentage = totalMark === null ? null : Number(((totalMark / Number(configuration.totalMaxMarks)) * 100).toFixed(2));
-      const resultStatus = totalMark >= Number(configuration.passMark) ? "Pass" : "Fail";
+      const calculation = calculateMark({
+        theoryMark: rowValue(excelRow, template.columns.theory),
+        practicalMark: rowValue(excelRow, template.columns.practical),
+        monthlyAssessmentMark: rowValue(excelRow, template.columns.monthly),
+        markStatus: "Present",
+      }, configuration);
+      calculation.errors.forEach((message) => errors.push({ ...errorContext, message }));
+      const { theoryMark, practicalMark, monthlyAssessmentMark, totalMark, percentage, resultStatus, remarks } = calculation.values;
       const existing = existingMap.get(`${studentId}:${configuration.subjectId}`);
       const hasChanges =
         !existing || changed(existing.theoryMark, theoryMark) || changed(existing.practicalMark, practicalMark) ||
-        changed(existing.totalMark, totalMark) || existing.resultStatus !== resultStatus || text(existing.remarks) !== remarks;
+        changed(existing.monthlyAssessmentMark, monthlyAssessmentMark) || changed(existing.totalMark, totalMark) || existing.resultStatus !== resultStatus || text(existing.remarks) !== remarks;
       rows.push({
         rowNumber,
         studentId,
@@ -323,6 +339,7 @@ const validateClassRows = (marksSheet, templateSubjects, context) => {
         subjectName: subject.name,
         theoryMark,
         practicalMark,
+        monthlyAssessmentMark,
         totalMark,
         percentage,
         resultStatus,
@@ -369,6 +386,8 @@ const classPreviewResponse = (inspection) => ({
     hasPractical: Boolean(item.hasPractical),
     theoryMaxMarks: Number(item.theoryMaxMarks),
     practicalMaxMarks: Number(item.practicalMaxMarks),
+    hasMonthlyAssessment: Boolean(item.hasMonthlyAssessment),
+    monthlyAssessmentMaxMarks: Number(item.monthlyAssessmentMaxMarks || 0),
     totalMaxMarks: Number(item.totalMaxMarks),
     passMark: Number(item.passMark),
   })),
@@ -385,7 +404,7 @@ const classPreviewResponse = (inspection) => ({
   errors: inspection.errors,
 });
 
-const importClassMarksWorkbook = async (inspection, fileName, userId) => {
+const importClassMarksWorkbook = async (inspection, fileName, userId, outerTransaction) => {
   if (inspection.errors.length) {
     const error = new Error("The class marks workbook contains validation errors");
     error.status = 422;
@@ -394,7 +413,7 @@ const importClassMarksWorkbook = async (inspection, fileName, userId) => {
   }
   const changedRows = inspection.rows.filter((item) => item.action !== "Unchanged");
   const { models, exam, selectedClass } = inspection.context;
-  await sequelize.transaction(async (transaction) => {
+  const persist = async (transaction) => {
     for (const row of changedRows) {
       const values = {
         examId: exam.id,
@@ -406,6 +425,7 @@ const importClassMarksWorkbook = async (inspection, fileName, userId) => {
         subjectId: row.subjectId,
         theoryMark: row.theoryMark,
         practicalMark: row.practicalMark,
+        monthlyAssessmentMark: row.monthlyAssessmentMark,
         totalMark: row.totalMark,
         percentage: row.percentage,
         grade: null,
@@ -429,6 +449,8 @@ const importClassMarksWorkbook = async (inspection, fileName, userId) => {
             newTheoryMark: row.theoryMark,
             oldPracticalMark: row.existing.practicalMark,
             newPracticalMark: row.practicalMark,
+            oldMonthlyAssessmentMark: row.existing.monthlyAssessmentMark,
+            newMonthlyAssessmentMark: row.monthlyAssessmentMark,
             oldTotalMark: row.existing.totalMark,
             newTotalMark: row.totalMark,
             reason: "All subjects Excel re-import",
@@ -439,7 +461,9 @@ const importClassMarksWorkbook = async (inspection, fileName, userId) => {
         await models.StudentMark.update(values, { where: { id: row.existing.id }, transaction });
       }
     }
-  });
+  };
+  if (outerTransaction) await persist(outerTransaction);
+  else await sequelize.transaction(persist);
   return {
     students: inspection.context.students.length,
     subjects: inspection.context.configurations.length,

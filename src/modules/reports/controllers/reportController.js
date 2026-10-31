@@ -180,8 +180,8 @@ exports.downloadStudentReportCard = async (req, res) => {
       doc.text(`Student: ${student.fullName}`);
       doc.text(`Admission No: ${student.admissionNo}`);
       doc.moveDown();
-      const widths = [190, 75, 75, 65, 75];
-      const headers = ["Subject", "Theory", "Practical", "Total", "Grade"];
+      const widths = [145, 65, 65, 75, 65, 65];
+      const headers = ["Subject", "Theory", "Practical", "Monthly Assessment", "Total", "Grade"];
       const drawRow = (values, bold = false) => {
         if (doc.y > 735) doc.addPage();
         const y = doc.y;
@@ -200,6 +200,7 @@ exports.downloadStudentReportCard = async (req, res) => {
           subjectMap.get(mark.subjectId)?.name || mark.subjectId,
           mark.theoryMark,
           mark.practicalMark,
+          mark.monthlyAssessmentMark,
           ["Absent", "Exempted"].includes(mark.resultStatus) ? mark.resultStatus : mark.totalMark,
           mark.grade,
         ])

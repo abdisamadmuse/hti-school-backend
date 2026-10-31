@@ -8,7 +8,7 @@ const Term = require("../../terms/models/Term");
 const Department = require("../../departments/models/Department");
 const Student = require("../../students/models/Student");
 
-const TEMPLATE_VERSION = "1.0";
+const TEMPLATE_VERSION = "1.1";
 
 const safeFilePart = (value) =>
   String(value || "marks")
@@ -162,6 +162,10 @@ const buildWorkbook = async (data) => {
       markMax: Number(examSubject.practicalMaxMarks),
     });
   }
+  if (examSubject.hasMonthlyAssessment) columns.push({
+    header: `Monthly Assessment (Max ${examSubject.monthlyAssessmentMaxMarks})`,
+    key: "monthlyAssessmentMark", width: 30, markMax: Number(examSubject.monthlyAssessmentMaxMarks),
+  });
   columns.push(
     { header: `Total (Max ${examSubject.totalMaxMarks})`, key: "total", width: 19 },
     { header: "Mark Status", key: "markStatus", width: 18 },
@@ -201,6 +205,7 @@ const buildWorkbook = async (data) => {
   const editableKeys = new Set([
     "theoryMark",
     "practicalMark",
+    "monthlyAssessmentMark",
     "markStatus",
     "remarks",
   ]);
@@ -216,7 +221,7 @@ const buildWorkbook = async (data) => {
       if (column.key === "total") {
         const markColumns = columns
           .map((item, index) => ({ ...item, index: index + 1 }))
-          .filter((item) => item.key === "theoryMark" || item.key === "practicalMark")
+          .filter((item) => ["theoryMark", "practicalMark", "monthlyAssessmentMark"].includes(item.key))
           .map((item) => marksSheet.getColumn(item.index).letter);
         cell.value = {
           formula: `IF(COUNT(${markColumns
@@ -292,6 +297,10 @@ const buildWorkbook = async (data) => {
     ["Department", department?.name || ""],
     ["Subject ID", subject._id],
     ["Subject", subject.name],
+    ["Has Theory", Boolean(examSubject.hasTheory)],
+    ["Has Practical", Boolean(examSubject.hasPractical)],
+    ["Has Monthly Assessment", Boolean(examSubject.hasMonthlyAssessment)],
+    ["Monthly Assessment Maximum", Number(examSubject.monthlyAssessmentMaxMarks || 0)],
     ["Theory Maximum", Number(examSubject.theoryMaxMarks)],
     ["Practical Maximum", Number(examSubject.practicalMaxMarks)],
     ["Total Maximum", Number(examSubject.totalMaxMarks)],

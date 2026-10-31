@@ -18,7 +18,7 @@ const fail = (res, error) => res.status(error.status || 500).json({ message: err
 const plain = (row) => row && row.get({ plain: true });
 
 const allowedDepartmentIds = (user) => {
-  if (user.role !== "HeadDepartment") return null;
+  if (!user || user.role !== "HeadDepartment") return null;
   return [...new Set([user.departmentId, ...(Array.isArray(user.departmentIds) ? user.departmentIds : [])]
     .map(Number).filter((value) => Number.isInteger(value) && value > 0))];
 };

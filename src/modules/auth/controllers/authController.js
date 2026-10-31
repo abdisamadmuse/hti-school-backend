@@ -2,6 +2,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
 const User = require("../../users/models/User");
+const Teacher = require("../../teachers/models/Teacher");
 
 const getAttendanceShift = (data) =>
   data.attendanceShift ||
@@ -15,10 +16,11 @@ const getAttendanceShift = (data) =>
 const generateToken = (user) => {
   return jwt.sign(
     {
-      id: user._id,
+      id: user.id ?? user._id,
       role: user.role,
       departmentId: user.departmentId,
       departmentIds: user.departmentIds || [],
+      teacherId: user.teacherId || null,
     },
     process.env.JWT_SECRET,
     {
@@ -30,9 +32,13 @@ const generateToken = (user) => {
 // Register User
 const registerUser = async (req, res) => {
   try {
-    const { fullName, email, phone, password, role, departmentId, departmentIds } =
+    const { fullName, email, phone, password, role, departmentId, departmentIds, teacherId } =
       req.body;
     const attendanceShift = getAttendanceShift(req.body);
+    if (role === "Teacher" && !teacherId) return res.status(400).json({ message: "Select a teacher profile for this Teacher account" });
+    if (teacherId && !await Teacher.findById(teacherId)) {
+      return res.status(400).json({ message: "Selected teacher was not found" });
+    }
 
     // Check existing user
     const existingUser = await User.findOne({
@@ -63,6 +69,7 @@ const registerUser = async (req, res) => {
       role,
       departmentId: departmentId || normalizedDepartmentIds[0] || null,
       departmentIds: normalizedDepartmentIds,
+      teacherId: teacherId || null,
       attendanceShift,
     });
 
@@ -73,13 +80,15 @@ const registerUser = async (req, res) => {
       message: "User registered successfully",
       token,
       user: {
-        id: user._id,
+        id: user.id ?? user._id,
+        _id: user.id ?? user._id,
         fullName: user.fullName,
         email: user.email,
         phone: user.phone,
         role: user.role,
         departmentId: user.departmentId,
         departmentIds: user.departmentIds,
+        teacherId: user.teacherId,
         attendanceShift: user.attendanceShift,
       },
     });
@@ -123,13 +132,15 @@ const loginUser = async (req, res) => {
       message: "Login successful",
       token,
       user: {
-        id: user._id,
+        id: user.id ?? user._id,
+        _id: user.id ?? user._id,
         fullName: user.fullName,
         email: user.email,
         phone: user.phone,
         role: user.role,
         departmentId: user.departmentId,
         departmentIds: user.departmentIds || [],
+        teacherId: user.teacherId || null,
         attendanceShift: user.attendanceShift,
       },
     });

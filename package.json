@@ -5,7 +5,11 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "sync:attendance-indexes": "node src/scripts/syncAttendanceIndexes.js"
+    "sync:attendance-indexes": "node src/scripts/syncAttendanceIndexes.js",
+    "test": "node --test --test-isolation=none tests/*.test.js",
+    "migrate:assessment": "node src/scripts/migrateAssessment.js",
+    "migrate:attendance": "node src/scripts/migrateAttendance.js",
+    "test:attendance:mysql": "node --test --test-isolation=none tests/attendance.mysql.js"
   },
   "keywords": [],
   "author": "",

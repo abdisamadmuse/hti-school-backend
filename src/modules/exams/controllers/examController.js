@@ -180,6 +180,13 @@ exports.updateExamStatus = async (req, res) => {
       });
     }
 
+    if (currentExam.status === "Published") return res.status(409).json({ message: "Use the dedicated unpublish endpoint before changing a published exam" });
+    if (status === "Open" && currentExam.status === "Draft") {
+      const configs = await require("../../examSubjects/models/ExamSubject").find({ examId: req.params.id, isActive: true });
+      if (!configs.length) return res.status(409).json({ message: "Prepare at least one active subject before opening the exam" });
+      const { configuration } = require("../../examMarks/services/assessment");
+      for (const config of configs) configuration(config);
+    }
     const exam = await populateExam(
       Exam.findByIdAndUpdate(req.params.id, {
         status,
@@ -212,4 +219,12 @@ exports.deleteExam = async (req, res) => {
   } catch (error) {
     handleError(res, error);
   }
+};
+
+exports.getReadiness = async (req, res) => {
+  try {
+    const { validatePublication } = require("../../results/services/resultPublicationService");
+    const { exam, classIds, errors } = await validatePublication(req.params.examId);
+    res.status(200).json({ data: { examId: exam.id, status: exam.status, readyToPublish: errors.length === 0, classes: classIds.length, errors } });
+  } catch (error) { handleError(res, error); }
 };

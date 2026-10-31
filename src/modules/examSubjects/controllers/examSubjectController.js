@@ -38,16 +38,13 @@ const requireDraftExam = async (examId) => {
   return exam;
 };
 
-const numberOrZero = (value) =>
-  value === undefined || value === null || value === "" ? 0 : Number(value);
-
 const booleanValue = (value, defaultValue) => {
   if (value === undefined || value === null || value === "") return defaultValue;
   if (typeof value === "string") return value.toLowerCase() === "true";
   return Boolean(value);
 };
 
-const buildConfiguration = async (data) => {
+const buildConfiguration = async (data, current = null) => {
   const { examId, classId, subjectId } = data;
   if (!examId || !classId || !subjectId) {
     const error = new Error("examId, classId and subjectId are required");
@@ -90,57 +87,23 @@ const buildConfiguration = async (data) => {
     throw error;
   }
 
-  const theoryMaxMarks = subject.hasTheory
-    ? numberOrZero(data.theoryMaxMarks)
-    : 0;
-  const practicalMaxMarks = subject.hasPractical
-    ? numberOrZero(data.practicalMaxMarks)
-    : 0;
-  const passMark = numberOrZero(data.passMark);
-  const totalMaxMarks = theoryMaxMarks + practicalMaxMarks;
-
-  if (![theoryMaxMarks, practicalMaxMarks, passMark].every(Number.isFinite)) {
-    const error = new Error("Maximum marks and pass mark must be valid numbers");
-    error.status = 400;
-    throw error;
-  }
-  if (theoryMaxMarks < 0 || practicalMaxMarks < 0 || passMark < 0) {
-    const error = new Error("Marks cannot be negative");
-    error.status = 400;
-    throw error;
-  }
-  if (subject.hasTheory && theoryMaxMarks <= 0) {
-    const error = new Error("theoryMaxMarks must be greater than zero for this subject");
-    error.status = 400;
-    throw error;
-  }
-  if (subject.hasPractical && practicalMaxMarks <= 0) {
-    const error = new Error("practicalMaxMarks must be greater than zero for this subject");
-    error.status = 400;
-    throw error;
-  }
-  if (!subject.hasTheory && !subject.hasPractical) {
-    const error = new Error("The selected subject has no enabled mark component");
-    error.status = 400;
-    throw error;
-  }
-  if (passMark > totalMaxMarks) {
-    const error = new Error("passMark cannot exceed total maximum marks");
-    error.status = 400;
-    throw error;
-  }
+  const { configuration } = require("../../examMarks/services/assessment");
+  const assessment = configuration({
+    hasTheory: current?.hasTheory ?? subject.hasTheory,
+    hasPractical: current?.hasPractical ?? subject.hasPractical,
+    hasMonthlyAssessment: data.hasMonthlyAssessment ?? subject.hasMonthlyAssessment ?? false,
+    theoryMaxMarks: data.theoryMaxMarks ?? subject.theoryMaxMarks,
+    practicalMaxMarks: data.practicalMaxMarks ?? subject.practicalMaxMarks,
+    monthlyAssessmentMaxMarks: data.monthlyAssessmentMaxMarks ?? subject.monthlyAssessmentMaxMarks,
+    passMark: data.passMark ?? subject.passMark,
+  });
 
   return {
     examId: Number(examId),
     classId: Number(classId),
     subjectId: Number(subjectId),
     departmentId: Number(selectedClass.departmentId),
-    hasTheory: Boolean(subject.hasTheory),
-    hasPractical: Boolean(subject.hasPractical),
-    theoryMaxMarks,
-    practicalMaxMarks,
-    totalMaxMarks,
-    passMark,
+    ...assessment,
     isActive: booleanValue(data.isActive, true),
   };
 };
@@ -215,11 +178,12 @@ exports.updateExamSubject = async (req, res) => {
     }
 
     const configuration = await buildConfiguration({
+      ...current,
       ...req.body,
       examId: current.examId,
       classId: current.classId,
       subjectId: current.subjectId,
-    });
+    }, current);
     const examSubject = await populateExamSubject(
       ExamSubject.findByIdAndUpdate(req.params.id, configuration)
     );

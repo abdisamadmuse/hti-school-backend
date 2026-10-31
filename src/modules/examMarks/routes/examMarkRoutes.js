@@ -27,6 +27,10 @@ const {
 } = require("../../../middleware/authMiddleware");
 
 const router = express.Router();
+const annualMarks = require("../controllers/annualMarksController");
+router.get("/annual-template", protect, authorize("SuperAdmin", "ExamManager", "HeadDepartment"), annualMarks.download);
+router.post("/annual-import/preview", protect, authorize("SuperAdmin", "ExamManager"), uploadExamExcel, annualMarks.preview);
+router.post(["/annual-import/confirm", "/annual-import"], protect, authorize("SuperAdmin", "ExamManager"), uploadExamExcel, annualMarks.confirm);
 
 router.get(
   "/template",

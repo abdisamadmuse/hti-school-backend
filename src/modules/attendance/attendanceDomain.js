@@ -1,0 +1,34 @@
+const STATUSES = ["Present", "Absent", "Late", "Permission"];
+const SESSIONS = ["BeforeBreak", "AfterBreak"];
+const ADMINS = ["SuperAdmin", "Director", "DeputyDirector", "StudentAffairs"];
+const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status }); };
+const id = value => { const n = Number(value); if (!["number", "string"].includes(typeof value) || !/^\d+$/.test(String(value)) || !Number.isSafeInteger(n) || n <= 0) fail("A positive integer ID is required"); return n; };
+const dateOnly = value => {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "") || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) fail("Invalid date (YYYY-MM-DD required)");
+  return value;
+};
+const day = value => new Date(value).toISOString().slice(0, 10);
+const contextKey = (kind, scope, studentId, date, session, lessonId = "legacy") =>
+  [kind, studentId, scope.academicYearId, scope.termId || 0, scope.classId, date, session, ...(kind === "lesson" ? [scope.subjectId, lessonId] : [])].join(":");
+const sessionKey = row => [row.studentId, row.academicYearId, row.termId || 0, row.classId, day(row.attendanceDate), row.attendanceSession].join(":");
+function summarize(records, expected = null) {
+  const counts = Object.fromEntries(STATUSES.map(status => [status, records.filter(r => r.status === status).length]));
+  return { ...counts, recorded: records.length, notTaken: expected === null ? null : Math.max(0, expected), percentage: records.length ? Number((counts.Present / records.length * 100).toFixed(1)) : null,
+    uniqueAbsentDates: [...new Set(records.filter(r => r.status === "Absent").map(r => day(r.attendanceDate)))].sort() };
+}
+function differences(daily, lessons) {
+  const present = new Set(daily.filter(r => r.status === "Present").map(sessionKey));
+  return lessons.filter(r => r.status === "Absent" && present.has(sessionKey(r)));
+}
+function departmentIds(user) {
+  let values = user.departmentIds || [];
+  if (typeof values === "string") { try { values = JSON.parse(values); } catch { values = []; } }
+  return [...new Set([user.departmentId, ...(Array.isArray(values) ? values : [])].map(v => Number(v?.id || v?._id || v)).filter(v => Number.isSafeInteger(v) && v > 0))];
+}
+function attendanceClassAllowed(user, classroom) {
+  if (!departmentIds(user).includes(Number(classroom.departmentId))) return false;
+  const shift = String(user.attendanceShift || "all").trim().toLowerCase();
+  return !shift || shift === "all" || String(classroom.shift).toLowerCase() === shift;
+}
+module.exports = { STATUSES, SESSIONS, ADMINS, fail, id, dateOnly, day, contextKey, sessionKey, summarize, differences, departmentIds, attendanceClassAllowed };

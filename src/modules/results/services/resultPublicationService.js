@@ -1,3 +1,4 @@
+const { calculateMark } = require("../../examMarks/services/assessment");
 const { Op } = require("sequelize");
 const { sequelize, initializeModels } = require("../../../config/mysql");
 
@@ -42,6 +43,7 @@ const validatePublication = async (examId) => {
       }),
       models.ExamSubject.findAll({ where: { examId, classId, isActive: true } }),
     ]);
+    if (!students.length) errors.push({ classId, message: "Class has no active students" });
     const summaryMap = new Map(summaries.map((item) => [item.studentId, item]));
     const latestConfigurationTime = classConfigurations.reduce(
       (latest, item) =>
@@ -53,7 +55,21 @@ const validatePublication = async (examId) => {
       .map((value) => new Date(value))
       .sort((left, right) => right - left)[0];
 
+    const marks = await models.StudentMark.findAll({ where: { examId, classId } });
+    const markMap = new Map(marks.map((mark) => [mark.studentId + ":" + mark.subjectId, mark]));
     students.forEach((student) => {
+      for (const config of classConfigurations) {
+        const mark = markMap.get(student.id + ":" + config.subjectId);
+        if (!mark || mark.resultStatus === "Missing") {
+          errors.push({ classId, studentId: student.id, subjectId: config.subjectId, message: "Mark is missing" });
+          continue;
+        }
+        const status = ["Absent", "Exempted"].includes(mark.resultStatus) ? mark.resultStatus : "Present";
+        const record = mark.get ? mark.get({ plain: true }) : mark;
+        const checked = calculateMark({ ...record, markStatus: status }, config);
+        checked.errors.forEach((message) => errors.push({ classId, studentId: student.id, subjectId: config.subjectId, message }));
+        if (!checked.errors.length && status === "Present" && Number(mark.totalMark) !== checked.values.totalMark) errors.push({ classId, studentId: student.id, subjectId: config.subjectId, message: "Stored total differs from enabled component scores; correct marks and recalculate" });
+      }
       const summary = summaryMap.get(student.id);
       if (!summary) {
         errors.push({ classId, studentId: student.id, admissionNo: student.admissionNo, message: "Result has not been calculated" });

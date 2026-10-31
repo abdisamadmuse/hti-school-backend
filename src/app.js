@@ -27,8 +27,11 @@ const promotionRuleRoutes = require("./modules/promotions/routes/promotionRuleRo
 const legacyResultRoutes = require("./modules/legacyResults/routes/legacyResultRoutes");
 const temporaryAnnualResultRoutes = require("./modules/temporaryAnnualResults/routes/temporaryAnnualResultRoutes");
 const disciplineRoutes = require("./modules/discipline/routes/disciplineRoutes");
+const teacherCourseContentRoutes = require("./modules/teacherCourseContent/routes/teacherCourseContentRoutes");
 
 const app = express();
+const { protect } = require("./middleware/authMiddleware");
+const { headDepartmentAccess, portalRoleAccess } = require("./middleware/portalAccessMiddleware");
 
 app.use(cors());
 app.use(express.json());
@@ -42,7 +45,9 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use("/api/programs", programRoutes);
 app.use("/api/academic-years", academicYearRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api", protect, portalRoleAccess, headDepartmentAccess, require("./middleware/attendanceResourceScope"));
 app.use("/api/users", userRoutes);
+app.use("/api/dashboard", require("./modules/dashboard/dashboardRoutes"));
 app.use("/api/departments", departmentRoutes);
 app.use("/api/classes", classRoutes);
 app.use("/api/class-sections", classSectionRoutes);
@@ -64,6 +69,7 @@ app.use("/api/promotion-rules", promotionRuleRoutes);
 app.use("/api/legacy-results", legacyResultRoutes);
 app.use("/api/temporary-annual-results", temporaryAnnualResultRoutes);
 app.use("/api/discipline", disciplineRoutes);
+app.use("/api/teacher-course-content", teacherCourseContentRoutes);
 
 app.get("/", (req, res) => {
   res.send("HTI School Management API Running...");

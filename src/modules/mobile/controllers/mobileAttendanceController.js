@@ -1,6 +1,9 @@
-const Attendance = require("../../attendance/models/Attendance");
+const Attendance = require("../../../config/mysql").model("DailyAttendance");
 const Class = require("../../classes/models/Class");
 const Student = require("../../students/models/Student");
+const ClassSection = require("../../classSections/models/ClassSection");
+const TeacherAssignment = require("../../teacherAssignments/models/TeacherAssignment");
+const { departmentIds, id, fail } = require("../../attendance/attendanceDomain");
 
 const uniqueIds = (ids) => [
   ...new Set((ids || []).filter(Boolean).map((id) => id.toString())),
@@ -32,32 +35,36 @@ const applyAttendanceShiftFilter = (filters, user) => {
   }
 };
 
-exports.getAssignedAttendanceClasses = async (req, res) => {
-  try {
-    const departmentIds = uniqueIds([
-      ...(req.user.departmentIds || []),
-      req.user.departmentId,
-    ]);
-
-    if (!departmentIds.length) {
-      return res.status(200).json({
-        message: "Assigned classes fetched successfully",
-        summary: {
-          departments: 0,
-          classes: 0,
-          done: 0,
-        },
-        departments: [],
-        classes: [],
-      });
+const assignedClassFilters = async (user) => {
+  const filters = { isActive: true };
+  if (user.role === "Teacher") {
+    const assignments = user.teacherId ? await TeacherAssignment.find({ teacherId: user.teacherId, isActive: true }) : [];
+    filters._id = { $in: uniqueIds(assignments.map(a => a.classId)) };
+  } else if (user.role === "AttendanceTaker") {
+    filters.departmentId = { $in: departmentIds(user) };
+  } else {
+    let departmentIds = user.departmentIds || [];
+    if (typeof departmentIds === "string") {
+      try { departmentIds = JSON.parse(departmentIds); } catch { departmentIds = []; }
     }
+    filters.departmentId = { $in: uniqueIds([
+      ...(Array.isArray(departmentIds) ? departmentIds : []),
+      user.departmentId,
+    ]) };
+  }
+  applyAttendanceShiftFilter(filters, user);
+  return filters;
+};
 
-    const classFilters = {
-      departmentId: { $in: departmentIds },
-      isActive: true,
-    };
-
-    applyAttendanceShiftFilter(classFilters, req.user);
+exports.getAssignedAttendanceClasses = async (req, res) => {
+  const Attendance = require("../../../config/mysql").model(req.user.role === "Teacher" ? "Attendance" : "DailyAttendance");
+  try {
+    const classFilters = await assignedClassFilters(req.user);
+    if (req.query.departmentId) {
+      const selected = id(req.query.departmentId);
+      if (req.user.role === "AttendanceTaker" && !departmentIds(req.user).includes(selected)) fail("Department is outside your assignments", 403);
+      classFilters.departmentId = selected;
+    }
 
     const classes = await Class.find(classFilters)
       .populate("departmentId")
@@ -207,26 +214,20 @@ exports.getAssignedAttendanceClasses = async (req, res) => {
       classes: classData,
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }
 };
 
 exports.getAssignedClassStudents = async (req, res) => {
+  const Attendance = require("../../../config/mysql").model(req.user.role === "Teacher" ? "Attendance" : "DailyAttendance");
   try {
-    const departmentIds = uniqueIds([
-      ...(req.user.departmentIds || []),
-      req.user.departmentId,
-    ]);
-
-    const classFilters = {
-      _id: req.params.classId,
-      departmentId: { $in: departmentIds },
-      isActive: true,
-    };
-
-    applyAttendanceShiftFilter(classFilters, req.user);
+    const classFilters = await assignedClassFilters(req.user);
+    if (classFilters._id && !classFilters._id.$in.includes(String(req.params.classId))) {
+      return res.status(404).json({ message: "Class not found in your active teacher assignments" });
+    }
+    classFilters._id = req.params.classId;
 
     const classItem = await Class.findOne(classFilters)
       .populate("departmentId")
@@ -235,8 +236,14 @@ exports.getAssignedClassStudents = async (req, res) => {
 
     if (!classItem) {
       return res.status(404).json({
-        message: "Class not found in your assigned departments",
+        message: "Class not found in your assignments",
       });
+    }
+
+    const sections = await ClassSection.find({ classId: classItem._id, isActive: true }).sort({ name: 1 });
+    const sectionId = req.query.classSectionId ? id(req.query.classSectionId) : null;
+    if (sectionId && !sections.some(section => Number(section._id) === sectionId)) {
+      return res.status(404).json({ message: "Section not found in this class" });
     }
 
     const startOfToday = new Date();
@@ -248,6 +255,7 @@ exports.getAssignedClassStudents = async (req, res) => {
     const [students, todayAttendance] = await Promise.all([
       Student.find({
         classId: classItem._id,
+        ...(sectionId ? { classSectionId: sectionId } : {}),
         isActive: true,
       }).sort({ fullName: 1 }),
       Attendance.find({
@@ -293,6 +301,8 @@ exports.getAssignedClassStudents = async (req, res) => {
           : null,
       },
       count: students.length,
+      sections: sections.map(section => ({ id: section._id, name: section.name })),
+      selectedSectionId: sectionId,
       students: students.map((student) => {
         const studentAttendance = todayAttendance
           .filter(
@@ -319,6 +329,7 @@ exports.getAssignedClassStudents = async (req, res) => {
           gender: student.gender,
           photoUrl: student.photoUrl,
           status: student.status,
+          classSectionId: student.classSectionId || null,
           attendanceToday: {
             beforeBreak: studentAttendance.BeforeBreak || null,
             afterBreak: studentAttendance.AfterBreak || null,
@@ -330,8 +341,18 @@ exports.getAssignedClassStudents = async (req, res) => {
       }),
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
+  }
+};
+
+exports.getAssignedAttendanceDepartments = async (req, res) => {
+  try {
+    const Department = require("../../../config/mysql").model("Department");
+    const departments = await Department.find({ _id: { $in: departmentIds(req.user) } }).sort({ name: 1 });
+    res.json({ count: departments.length, departments });
+  } catch (error) {
+    res.status(error.status || 500).json({ message: error.message });
   }
 };

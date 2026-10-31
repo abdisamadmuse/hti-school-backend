@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
 const User = require("../models/User");
+const Teacher = require("../../teachers/models/Teacher");
 
 const normalizeDepartmentIds = ({ departmentId, departmentIds }) => {
   if (Array.isArray(departmentIds)) {
@@ -18,7 +19,16 @@ const getAttendanceShift = (data) =>
   data.shift;
 
 const populateUserDepartments = (query) =>
-  query.populate("departmentId").populate("departmentIds");
+  query.populate("departmentId").populate("departmentIds").populate("teacherId");
+
+const validateTeacherAccount = async (role, teacherId) => {
+  if (role === "Teacher" && !teacherId) { const error = new Error("Select a teacher profile for this Teacher account"); error.status = 400; throw error; }
+  if (teacherId && !await Teacher.findById(teacherId)) {
+    const error = new Error("Selected teacher was not found");
+    error.status = 400;
+    throw error;
+  }
+};
 
 // Get all users
 exports.getUsers = async (req, res) => {
@@ -64,8 +74,10 @@ exports.createUser = async (req, res) => {
       role,
       departmentId,
       departmentIds,
+      teacherId,
     } = req.body;
     const attendanceShift = getAttendanceShift(req.body);
+    await validateTeacherAccount(role, teacherId);
 
     const exists = await User.findOne({
       $or: [{ email }, { phone }],
@@ -89,6 +101,7 @@ exports.createUser = async (req, res) => {
       role,
       departmentId: departmentId || normalizedDepartmentIds[0] || null,
       departmentIds: normalizedDepartmentIds,
+      teacherId: teacherId || null,
       attendanceShift,
     });
 
@@ -102,6 +115,7 @@ exports.createUser = async (req, res) => {
         role: user.role,
         departmentId: user.departmentId,
         departmentIds: user.departmentIds,
+        teacherId: user.teacherId,
         attendanceShift: user.attendanceShift,
         isActive: user.isActive,
       },
@@ -116,6 +130,9 @@ exports.updateUser = async (req, res) => {
   try {
     const { password, ...updateData } = req.body;
     const attendanceShift = getAttendanceShift(updateData);
+    const currentUser = await User.findById(req.params.id);
+    if (!currentUser) return res.status(404).json({ message: "User not found" });
+    await validateTeacherAccount(updateData.role || currentUser.role, updateData.teacherId ?? currentUser.teacherId);
 
     if (password) {
       updateData.password = await bcrypt.hash(password, 10);
