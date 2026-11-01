@@ -52,11 +52,12 @@ function studentSummary(groups, programs, departments, classes) {
   return { students: totals, departments: [...rows.values()] };
 }
 function attendanceSummary(rows, date, session) {
-  const counts = { Present: 0, Absent: 0, Late: 0, Permission: 0 };
+  const counts = { Present: 0, Absent: 0, Late: 0, Permission: 0, Free: 0 };
   for (const row of rows) if (row.date === date && row.session === session && row.status in counts) counts[row.status] += Number(row.count);
   const recorded = Object.values(counts).reduce((sum, n) => sum + n, 0);
   const percentages = Object.fromEntries(Object.entries(counts).map(([key, count]) => [key, recorded ? Number((count * 100 / recorded).toFixed(1)) : null]));
-  return { date, session, counts, recorded, percentages, presentPercentage: percentages.Present, hasData: recorded > 0 };
+  const eligible = recorded - counts.Free;
+  return { date, session, counts, recorded, eligible, percentages, presentPercentage: eligible ? Number((counts.Present * 100 / eligible).toFixed(1)) : null, hasData: recorded > 0 };
 }
 async function summary(user, query = {}) {
   const context = filtersFor(user, query);
@@ -105,7 +106,7 @@ async function summary(user, query = {}) {
     }),
     upcomingActivities: [],
     upcomingActivitiesAvailable: false,
-    definitions: { students: "Active student accounts with status Active; grouped by current enrollment.", attendance: "Daily attendance only; each student counted once per date/session. Latest updated context wins, then highest ID. Missing records are not absences.", presentPercentage: "Present / recorded (Present + Absent + Late + Permission) * 100; null when nothing is recorded.", upcomingActivities: "No activity source is configured." },
+    definitions: { students: "Active student accounts with status Active; grouped by current enrollment.", attendance: "Daily attendance only; each student counted once per date/session. Latest updated context wins, then highest ID. Missing records are not absences.", presentPercentage: "Present / eligible (Present + Absent + Late + Permission) * 100; Free excluded; null when no eligible records. Status percentages use all recorded marks.", upcomingActivities: "No activity source is configured." },
   };
 }
 module.exports = { summary, filtersFor, studentSummary, attendanceSummary, addDays };

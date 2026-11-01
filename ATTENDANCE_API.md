@@ -76,7 +76,33 @@ Each roster student has current `attendance`, including `id`/`updatedAt`/`revisi
 
 `POST /lesson/mark` uses `assignmentId` instead of submitted class/year/term and also accepts `lessonId`, such as `P1` or `P2`. Use the stable timetable period ID (1–64 letters, digits, hyphens or underscores). Multiple lessons within the same break session must have separate IDs. Omission defaults to `legacy` for older clients. New lesson records always identify their teacher assignment.
 
-Both workflows accept Present, Absent, Late, Permission and optional remarks up to 2,000 characters. Duplicate students, invalid dates/statuses/sessions, out-of-term dates and students outside the active class/year are rejected. Batches are atomic; lesson writes never touch daily records.
+Both workflows accept Present, Absent, Late, Permission and optional remarks up to 2,000 characters. Daily attendance additionally supports Free (F), as described below. Duplicate students, invalid dates/statuses/sessions, out-of-term dates and students outside the active class/year or selected section are rejected. Batches are atomic; lesson writes never touch daily records.
+
+### Free (F): authorized release after an exam
+
+The API value is `"Free"`; display it as **Free (F)**. AttendanceTaker accounts within assigned departments/shifts and administrators (including StudentAffairs) may record it through `POST /api/attendance/daily/mark`. Free is for daily releases, not lesson marks. Every Free record requires nonblank `remarks` explaining the release (maximum 2,000 characters).
+
+```json
+{
+  "classId": 10,
+  "academicYearId": 2026,
+  "termId": 1,
+  "classSectionId": 2,
+  "date": "2026-11-01",
+  "session": "AfterBreak",
+  "records": [
+    { "studentId": 100, "status": "Free", "remarks": "Released after final exam" }
+  ]
+}
+```
+
+For Mark all Free, load the selected roster and send one record per displayed student. Include `classSectionId` for a specific section; omit it for All Sections. The server validates class/year/section membership, rather than trusting submitted student IDs. Before Break and After Break are independent, so a full day requires explicitly saving both sessions. The bulk action must not silently convert the other session.
+
+Existing records still require a `correctionReason` and current `versions` when changed. Unchanged retries are idempotent. Initial Free audit entries retain the release reason; corrections retain the previous status and reason through the existing audit trail.
+
+Free is counted in `recorded` and the new `Free` summary/export column. `eligible = recorded - Free`; attendance percentage excludes Free and Not Taken. A roster containing only Free marks has a null attendance percentage, not 0%. Free is neither an absence nor an unrecorded expected session, and it does not trigger daily-present/lesson-absent alerts.
+
+Deployment: back up the database, then run `npm run migrate:attendance` before using Free. Startup also runs this repeatable migration. It extends existing attendance status enums without changing historical marks. Deploy the UI after the API/schema update. No mobile app source is included here; mobile clients must send `"Free"`, require the reason and show F using this contract.
 
 Unchanged retries are idempotent. To change an existing record, add:
 
@@ -97,11 +123,11 @@ Legacy `/assignments`, `/roster`, `/mark`, `POST /`, `POST /bulk`, `PUT /:id` an
 
 Responses include:
 
-- `data`: per-student/class/term daily summaries, or per-student/subject/class/term lesson summaries. Includes four status counts, `recorded`, `notTaken`, `percentage`, coverage and display names. Daily summaries include unique absent dates.
+- `data`: per-student/class/term daily summaries, or per-student/subject/class/term lesson summaries. Includes five status counts (including `Free`), `recorded`, `eligible`, `notTaken`, `percentage`, coverage and display names. Daily summaries include unique absent dates.
 - `details`: recorded sessions or lessons with period IDs, status and remarks.
 - `review`: lesson Absent records matching daily Present for the same student/year/term/class/date/session.
 - `followUp`: student/subject patterns with at least two such recorded differences in the month. Messages request review without assuming motives.
-- `formula`: **Present / (Present + Absent + Late + Permission) × 100**. Late and Permission remain in the denominator; Not taken is excluded. Empty denominators return null, displayed as a dash.
+- `formula`: **Present / (Present + Absent + Late + Permission) × 100**. Late and Permission remain in the denominator; Free and Not taken are excluded. Empty denominators return null, displayed as a dash.
 
 Add `format=xlsx` for an actual Excel workbook containing summary, details, differences, follow-up and formula/filter metadata. The portal prints either selected view or saves it as PDF using the browser dialog.
 
@@ -149,6 +175,6 @@ Expected counts include only school-day entries whose end timestamp has elapsed.
 - GET /daily/sections and /lesson/sections require classId and accept academicYearId/departmentId. They return active sections only after checking the user's permitted attendance class scopes.
 - GET /daily, /daily/roster, /lesson/roster, /daily/monthly and /lesson/monthly accept optional classSectionId. A section requires classId; invalid IDs return 400, out-of-scope classes 403, and inactive or wrong-class sections 404. Omitting classSectionId includes all sections and unassigned students.
 - Monthly reads accept attendanceDate (YYYY-MM-DD, within month) and attendanceSession (BeforeBreak or AfterBreak). These filters also constrain recorded details, expected scheduled sessions, differences, follow-up and format=xlsx exports.
-- Monthly results include backend-calculated totals: students, Present, Absent, Late, Permission and notTaken (null when coverage is unavailable). Selected section metadata is included in context and summary/export rows.
+- Monthly results include backend-calculated totals: students, Present, Absent, Late, Permission, Free and notTaken (null when coverage is unavailable). Selected section metadata is included in context and summary/export rows.
 - Existing attendance rows do not store a historical section snapshot. Section-filtered history uses current student section membership and does not invent historical section assignments.
 - Mark endpoints and attendance-writing authorization are unchanged. These additions are for viewing only and do not assert section enforcement on writes.

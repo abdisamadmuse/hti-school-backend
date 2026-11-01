@@ -99,9 +99,14 @@ async function mark(user, kind, input, outerTransaction = null) {
   for (const record of records) {
     if (!STATUSES.includes(record.status)) fail("Invalid attendance status");
     if (typeof (record.remarks || "") !== "string" || (record.remarks || "").length > 2000) fail("Remarks must be text up to 2000 characters");
+    if (record.status === "Free") {
+      if (kind !== "daily" || ![...ADMINS, "AttendanceTaker"].includes(user.role)) fail("Free is available for daily attendance takers and administrators only", 403);
+      if (!record.remarks?.trim()) fail("A reason is required in remarks for Free attendance");
+    }
   }
   const M = models();
-  const students = await M.Student.findAll({ where: { id: { [Op.in]: ids }, classId: scope.classId, academicYearId: scope.academicYearId, isActive: true } });
+  const section = await sectionSelection(user, kind, { ...input, classId: scope.classId }, [scope]);
+  const students = await M.Student.findAll({ where: { id: { [Op.in]: ids }, classId: scope.classId, academicYearId: scope.academicYearId, isActive: true, ...(section ? { classSectionId: section.id } : {}) } });
   if (students.length !== ids.length) fail("Students must be active members of the assigned class and year");
   const term = scope.termId ? await M.Term.findByPk(scope.termId) : null;
   if (term && (date < day(term.startDate) || date > day(term.endDate))) fail("Date is outside the assigned term");
@@ -119,7 +124,7 @@ async function mark(user, kind, input, outerTransaction = null) {
       if (existing && input.versions?.[record.studentId] !== existing.revision) fail("Attendance changed since it was loaded. Reload before correcting.", 409);
       const before = existing ? plain(existing) : null;
       const row = existing ? await existing.update(values, { transaction }) : await table.create(values, { transaction });
-      await M.AttendanceAudit.create({ kind, recordId: row.id, actorId: user.id, reason: existing ? input.correctionReason.trim() : "Initial recording", before, after: plain(row) }, { transaction });
+      await M.AttendanceAudit.create({ kind, recordId: row.id, actorId: user.id, reason: existing ? input.correctionReason.trim() : record.status === "Free" ? record.remarks.trim() : "Initial recording", before, after: plain(row) }, { transaction });
       saved.push(row);
     }
     return saved;
@@ -147,7 +152,7 @@ async function report(user, kind, query) {
       if (!allowed.some(a => a.classId === c.classId)) allowed.push({ classId: c.classId, academicYearId: id(query.academicYearId), departmentId: c.departmentId });
     }
   }
-  if (!scopeWhere.length) return { data: [], details: [], review: [], followUp: [], totals: { students: 0, Present: 0, Absent: 0, Late: 0, Permission: 0, notTaken: null }, formula: "Present / (Present + Absent + Late + Permission) × 100; Not taken excluded" };
+  if (!scopeWhere.length) return { data: [], details: [], review: [], followUp: [], totals: { students: 0, Present: 0, Absent: 0, Late: 0, Permission: 0, Free: 0, notTaken: null }, formula: "Present / (Present + Absent + Late + Permission) × 100; Free and Not taken excluded" };
   const where = { [Op.or]: scopeWhere, attendanceDate: { [Op.gte]: start, [Op.lt]: end }, ...selectionWhere };
   if (section) where.studentId = { [Op.in]: section.studentIds.filter(studentId => !query.studentId || studentId === id(query.studentId)) };
   else if (query.studentId) where.studentId = id(query.studentId);
@@ -191,8 +196,8 @@ async function report(user, kind, query) {
     const group = follow.get(key) || { studentId: r.studentId, subjectId: r.subjectId, missedLessonsWhileDailyPresent: 0 };
     group.missedLessonsWhileDailyPresent++; follow.set(key, group);
   }
-  const totals = { students: new Set(data.map(r => r.studentId)).size, Present: 0, Absent: 0, Late: 0, Permission: 0, notTaken: data.length && data.every(r => r.notTaken !== null) ? data.reduce((n, r) => n + r.notTaken, 0) : null };
+  const totals = { students: new Set(data.map(r => r.studentId)).size, Present: 0, Absent: 0, Late: 0, Permission: 0, Free: 0, notTaken: data.length && data.every(r => r.notTaken !== null) ? data.reduce((n, r) => n + r.notTaken, 0) : null };
   for (const row of data) for (const status of STATUSES) totals[status] += row[status];
-  return { totals, context: { classId: query.classId ? id(query.classId) : null, classSectionId: section?.id || null, sectionName: section?.name || null, attendanceDate: query.attendanceDate || null, attendanceSession: query.attendanceSession || null }, data, details: records, review, followUp: [...follow.values()].filter(r => r.missedLessonsWhileDailyPresent >= 2).map(r => ({ ...r, fullName: students.find(s => s.id === r.studentId)?.fullName || null, subjectName: subjectNames.find(s => s.id === r.subjectId)?.name || null, message: "Repeated missed subject lessons during sessions recorded Present in daily attendance; review required." })), formula: "Present / (Present + Absent + Late + Permission) × 100; Not taken excluded" };
+  return { totals, context: { classId: query.classId ? id(query.classId) : null, classSectionId: section?.id || null, sectionName: section?.name || null, attendanceDate: query.attendanceDate || null, attendanceSession: query.attendanceSession || null }, data, details: records, review, followUp: [...follow.values()].filter(r => r.missedLessonsWhileDailyPresent >= 2).map(r => ({ ...r, fullName: students.find(s => s.id === r.studentId)?.fullName || null, subjectName: subjectNames.find(s => s.id === r.subjectId)?.name || null, message: "Repeated missed subject lessons during sessions recorded Present in daily attendance; review required." })), formula: "Present / (Present + Absent + Late + Permission) × 100; Free and Not taken excluded" };
 }
 module.exports = { scopes, resolveScope, roster, mark, report, requireAdmin, models, plain, sections, sectionSelection };

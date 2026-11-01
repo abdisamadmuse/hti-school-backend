@@ -27,6 +27,9 @@ test("MySQL migration, uniqueness, concurrent submissions, audit rollback and au
     await migrate(sequelize); await migrate(sequelize);
     const M = require("../src/config/mysql").initializeModels();
     await sequelize.sync();
+    await sequelize.query("ALTER TABLE dailyattendances MODIFY status ENUM('Present','Absent','Late','Permission') NOT NULL");
+    await migrate(sequelize); await migrate(sequelize);
+    assert.match((await sequelize.getQueryInterface().describeTable("dailyattendances")).status.type, /Free/);
     assert.equal(await M.Attendance.count(), 1); assert.equal(await M.DailyAttendance.count(), 0);
     const historical = await M.Attendance.findByPk(1);
     assert.equal(historical.lessonId, "legacy"); assert.equal(historical.teacherAssignmentId, null);
@@ -149,6 +152,28 @@ test("MySQL migration, uniqueness, concurrent submissions, audit rollback and au
     const wrongYear = (await (await call("/dashboard?academicYearId=2099&date=2025-01-02", 1)).json()).data;
     assert.equal(wrongYear.students.total, 0);
     assert.equal(wrongYear.todayAttendance.recorded, 0);
+    await M.User.create({ id: 7, fullName: "Student Affairs", phone: "test7", password: "unused", role: "StudentAffairs" });
+    const freeInput = { ...input, date: "2025-01-04", classSectionId: 1, records: [{ studentId: 100, status: "Free", remarks: "Released after final exam" }] };
+    assert.equal((await call("/attendance/daily/mark", 7, { method: "POST", body: JSON.stringify({ ...freeInput, records: [{ studentId: 100, status: "Free" }] }) })).status, 400);
+    const freeResponse = await call("/attendance/daily/mark", 7, { method: "POST", body: JSON.stringify(freeInput) });
+    assert.equal(freeResponse.status, 200);
+    const freeRow = (await freeResponse.json()).data[0];
+    assert.equal(freeRow.status, "Free");
+    assert.equal((await call("/attendance/daily/mark", 3, { method: "POST", body: JSON.stringify(freeInput) })).status, 200);
+    const freeReport = await (await call("/attendance/daily/monthly?academicYearId=2025&classId=10&classSectionId=1&month=2025-01&attendanceDate=2025-01-04", 7)).json();
+    assert.equal(freeReport.totals.Free, 1);
+    assert.equal(freeReport.data[0].percentage, null);
+    const freeDashboard = (await (await call("/dashboard?academicYearId=2025&date=2025-01-04", 1)).json()).data;
+    assert.equal(freeDashboard.todayAttendance.counts.Free, 1);
+    assert.equal(freeDashboard.todayAttendance.eligible, 0);
+    assert.equal(freeDashboard.todayAttendance.presentPercentage, null);
+    const freeExport = await call("/attendance/daily/monthly?academicYearId=2025&month=2025-01&format=xlsx", 7);
+    const freeWorkbook = new (require("exceljs").Workbook)();
+    await freeWorkbook.xlsx.load(Buffer.from(await freeExport.arrayBuffer()));
+    assert.ok(freeWorkbook.worksheets[0].getRow(3).values.includes("Free"));
+    await migrate(sequelize); await migrate(sequelize);
+    assert.equal((await M.DailyAttendance.findByPk(freeRow.id)).status, "Free");
+    assert.equal((await call("/attendance/daily/mark", 7, { method: "POST", body: JSON.stringify({ ...freeInput, records: [{ studentId: 100, status: "Present" }] }) })).status, 409);
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));
     if (sequelize) await sequelize.close();

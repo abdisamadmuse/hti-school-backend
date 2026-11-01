@@ -84,9 +84,9 @@ The response is `{ "data": { ... } }`. Example values below are illustrative. Th
     "todayAttendance": {
       "date": "2026-10-31",
       "session": "BeforeBreak",
-      "counts": { "Present": 24, "Absent": 3, "Late": 2, "Permission": 1 },
-      "recorded": 30,
-      "percentages": { "Present": 80, "Absent": 10, "Late": 6.7, "Permission": 3.3 },
+      "counts": { "Present": 24, "Absent": 3, "Late": 2, "Permission": 1, "Free": 0 },
+      "recorded": 30, "eligible": 30,
+      "percentages": { "Present": 80, "Absent": 10, "Late": 6.7, "Permission": 3.3, "Free": 0 },
       "presentPercentage": 80,
       "hasData": true
     },
@@ -94,9 +94,9 @@ The response is `{ "data": { ... } }`. Example values below are illustrative. Th
       {
         "date": "2026-10-31",
         "session": "BeforeBreak",
-        "counts": { "Present": 24, "Absent": 3, "Late": 2, "Permission": 1 },
-        "recorded": 30,
-        "percentages": { "Present": 80, "Absent": 10, "Late": 6.7, "Permission": 3.3 },
+        "counts": { "Present": 24, "Absent": 3, "Late": 2, "Permission": 1, "Free": 0 },
+        "recorded": 30, "eligible": 30,
+        "percentages": { "Present": 80, "Absent": 10, "Late": 6.7, "Permission": 3.3, "Free": 0 },
         "presentPercentage": 80,
         "hasData": true,
         "dayName": "Sabti"
@@ -107,7 +107,7 @@ The response is `{ "data": { ... } }`. Example values below are illustrative. Th
     "definitions": {
       "students": "Active student accounts with status Active; grouped by current enrollment.",
       "attendance": "Daily attendance only; each student counted once per date/session. Latest updated context wins, then highest ID. Missing records are not absences.",
-      "presentPercentage": "Present / recorded (Present + Absent + Late + Permission) * 100; null when nothing is recorded.",
+      "presentPercentage": "Present / eligible (Present + Absent + Late + Permission) * 100; Free excluded; null when no eligible records. Status percentages use all recorded marks.",
       "upcomingActivities": "No activity source is configured."
     }
   }
@@ -120,8 +120,8 @@ The response is `{ "data": { ... } }`. Example values below are illustrative. Th
 - Program cards: `data.students.vocational` and `.secondary`, including male/female counts.
 - Department table: `data.departments`; expand `classes` for the View classes action. IDs distinguish classes with identical names. Department/class rows with zero active students remain visible.
 - Department table overall totals: sum the department rows or use `data.students` under the same filters.
-- Daily doughnut and legend: `data.todayAttendance`; display all four statuses, including Permission. Roundings may sum to slightly above or below 100%.
-- Weekly bars: `data.weeklyAttendance`, labels Sabti, Axad, Isniin, Talaado, Arbaco. Plot `counts.Present` and `counts.Absent` as shown in the design. Each day also includes Late and Permission for a complete tooltip.
+- Daily doughnut and legend: `data.todayAttendance`; display all five statuses, including Permission and Free (F). Roundings may sum to slightly above or below 100%.
+- Weekly bars: `data.weeklyAttendance`, labels Sabti, Axad, Isniin, Talaado, Arbaco. Plot `counts.Present` and `counts.Absent` as shown in the design. Each day also includes Late, Permission and Free (F) for a complete tooltip.
 - Empty attendance: `hasData: false`, recorded/status counts zero, percentages null. Show “No attendance recorded”; do not show a fabricated 0% attendance rate or count missing students as absent. Future dates likewise have no records rather than forecast data.
 - Student cards count current active enrollments (`isActive=true`, `status=Active`). Attendance counts saved daily marks in the requested year/department, including historical marks for students whose current enrollment has changed. Thus recorded counts and current student totals need not match.
 - Lesson attendance is never mixed into these charts. Attendance for every taker is included, not only the logged-in user's marks. Overlapping term/class records for the same student/date/session are deduplicated after applying the year/department filters; latest updated context wins, then highest ID.
@@ -135,3 +135,5 @@ Replace the dashboard's many student/class/attendance requests with this single 
 Quick links remain frontend navigation actions. Changing the department table's filter can either refetch the dashboard with `departmentId` (updates all widgets) or filter the returned department rows locally if that control is intended to affect only the table. The API's `departmentId` always applies consistently to all returned metrics.
 
 Validation: `npm test` includes dashboard filter/aggregation tests. `npm run test:attendance:mysql` uses an isolated temporary database and checks authenticated dashboard requests, year/session/department isolation, department-head permissions, no-data handling and duplicate attendance contexts.
+
+Free (F) marks are recorded but excluded from the attendance-rate denominator. Use `presentPercentage` for the attendance rate; do not use `percentages.Present` for this because status percentages describe all recorded marks, including Free. When every mark is Free, `hasData` is true, `eligible` is zero, and `presentPercentage` is null: display 'Free / no eligible attendance', not 0%.

@@ -51,3 +51,16 @@ test("attendance denominator includes Permission and Late; dates and sessions st
   assert.equal(empty.hasData, false);
   assert.equal(empty.counts.Absent, 0);
 });
+
+test("Free is recorded and counted in the legend but excluded from the attendance rate", () => {
+  const rows = [{ date: "2026-10-31", session: "BeforeBreak", status: "Present", count: 8 }, { date: "2026-10-31", session: "BeforeBreak", status: "Absent", count: 2 }, { date: "2026-10-31", session: "BeforeBreak", status: "Free", count: 10 }];
+  const result = service.attendanceSummary(rows, "2026-10-31", "BeforeBreak");
+  assert.equal(result.recorded, 20);
+  assert.equal(result.eligible, 10);
+  assert.equal(result.counts.Free, 10);
+  assert.equal(result.presentPercentage, 80);
+  assert.equal(result.percentages.Free, 50);
+  const freeOnly = service.attendanceSummary(rows.slice(2), "2026-10-31", "BeforeBreak");
+  assert.equal(freeOnly.hasData, true);
+  assert.equal(freeOnly.presentPercentage, null);
+});

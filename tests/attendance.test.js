@@ -222,6 +222,39 @@ test("percentage denominator includes Late and Permission, excluding Not taken",
   assert.equal(domain.summarize([]).percentage, null);
 });
 
+test("Free release requires a reason and daily access; retries and audited corrections remain safe", async () => {
+  const { service, state } = await setup();
+  const input = { ...dailyInput, records: [{ studentId: 100, status: "Free", remarks: "Released after exam" }] };
+  await assert.rejects(service.mark(taker, "daily", { ...input, records: [{ studentId: 100, status: "Free", remarks: "  " }] }), { status: 400 });
+  await assert.rejects(service.mark(teacher, "lesson", { ...input, assignmentId: 1 }), { status: 403 });
+  await assert.rejects(service.mark({ ...taker, departmentIds: [6] }, "daily", input), { status: 403 });
+  await service.mark(taker, "daily", input);
+  await service.mark(taker, "daily", input);
+  assert.equal(state.DailyAttendance.length, 1);
+  assert.equal(state.AttendanceAudit.length, 1);
+  assert.equal(state.AttendanceAudit[0].reason, "Released after exam");
+  const report = await service.report(taker, "daily", { academicYearId: 2025, month: "2025-01" });
+  assert.equal(report.totals.Free, 1);
+  assert.equal(report.data[0].recorded, 1);
+  assert.equal(report.data[0].eligible, 0);
+  assert.equal(report.data[0].percentage, null);
+  await assert.rejects(service.mark(taker, "daily", dailyInput), { status: 409 });
+  await service.mark(taker, "daily", { ...dailyInput, correctionReason: "Student stayed", versions: { 100: 0 } });
+  assert.equal(state.AttendanceAudit[1].before.status, "Free");
+  const mixed = domain.summarize([{ status: "Present" }, { status: "Free" }, { status: "Absent" }].map(r => ({ ...r, attendanceDate: "2025-01-02" })));
+  assert.equal(mixed.percentage, 50);
+  assert.equal(mixed.Free, 1);
+});
+
+test("section Free batches cannot contain students from a different section and are atomic", async () => {
+  const { service, state } = await sectionSetup();
+  const date = "2025-01-03", beforeCount = state.DailyAttendance.length;
+  await assert.rejects(service.mark(taker, "daily", { ...dailyInput, date, classSectionId: 1, records: [{ studentId: 100, status: "Free", remarks: "Exam finished" }, { studentId: 101, status: "Free", remarks: "Exam finished" }] }), { status: 400 });
+  assert.equal(state.DailyAttendance.length, beforeCount);
+  await service.mark({ id: 4, role: "StudentAffairs" }, "daily", { ...dailyInput, date, classSectionId: 1, records: [{ studentId: 100, status: "Free", remarks: "Exam finished" }] });
+  assert.equal(state.DailyAttendance.at(-1).status, "Free");
+});
+
 async function sectionSetup() {
   const h = await setup();
   await h.M.ClassSection.create({ id: 1, classId: 10, name: "Section A", isActive: true });

@@ -3,6 +3,17 @@ module.exports = async function migrateAttendance(sequelize) {
   const { DataTypes } = require("sequelize");
   const qi = sequelize.getQueryInterface();
   const tables = await qi.showAllTables();
+  for (const table of ["attendances", "dailyattendances"]) {
+    if (!tables.includes(table)) continue;
+    const status = (await qi.describeTable(table)).status;
+    if (status && !String(status.type).includes("'Free'")) {
+      await qi.changeColumn(table, "status", {
+        type: DataTypes.ENUM("Present", "Absent", "Late", "Permission", "Free"),
+        allowNull: status.allowNull,
+        ...(status.defaultValue != null ? { defaultValue: status.defaultValue } : {}),
+      });
+    }
+  }
   if (tables.includes("dailyattendances")) {
     const dailyColumns = await qi.describeTable("dailyattendances");
     if (!dailyColumns.revision) await qi.addColumn("dailyattendances", "revision", { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 });
