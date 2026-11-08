@@ -1,5 +1,35 @@
 # Daily class and subject lesson attendance
 
+## Department absence report
+
+`GET /api/attendance/daily/absence-report?academicYearId=2026&date=2026-11-07`
+
+Requires the usual Bearer token and daily attendance permissions. Optional filters:
+`departmentId`, `classId`, `classSectionId`, `termId`, `studentId`.
+Omit `departmentId` for all permitted departments. The caller supplies the selected
+date (the UI can default it to yesterday in Africa/Nairobi).
+
+JSON returns `selectedDate`, `historyStart`, `historyEnd`, `formula`, `totals`
+(students, fullDay, halfDay), and `departments`. Each department contains its ID,
+name and students absent in at least one daily session on the selected date.
+Students include admission number, name, class, before/after-break statuses,
+`selectedDateAbsentDays`, `monthlyAbsentDays`, `absentDatesCount`, and `history`
+entries with date, missed sessions and absent days. History runs from the start
+of the selected month through the selected date, inclusive. Each distinct absent
+daily session contributes 0.5 day, capped at one day per date. Missing sessions
+show `Not recorded`; conflicting statuses show `Review required`.
+
+Append `&format=pdf` for a printable PDF with each department starting on a new
+page, or `&format=xlsx` for an Excel workbook with a worksheet per department.
+No recorded absences returns an empty department list and zero totals.
+
+This is a read-only report: no migration or attendance changes are performed.
+Only DailyAttendance records are used. Historical lesson-only attendance is not
+converted into daily attendance. Existing monthly endpoints retain their session
+counts and behavior. A frontend report button/date picker must call this endpoint
+to expose it in the application UI.
+
+
 The Attendance page and student Attendance history have separate daily and lesson views, monthly filters, recorded details, Excel export and Print / Save PDF through the browser dialog. Administrators manage direct class assignments in Attendance. Teachers default to lesson entry.
 
 ## Deployment and historical records
